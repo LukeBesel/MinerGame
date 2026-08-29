@@ -11,8 +11,10 @@ const HUD_SCENE := "res://src/ui/hud.tscn"
 
 func _ready() -> void:
 	InputSetup.register_actions()
-	_boot_game()
+	# Layers first: SaveManager.boot_load() emits offline_report synchronously, so the
+	# HUD must already be subscribed or the "While you were away" popup is lost.
 	_instance_layers()
+	_boot_game()
 	EventBus.load_completed.emit()
 	_maybe_run_smoke()
 

@@ -192,6 +192,11 @@ func _recompute() -> void:
 	_global_mult = float(_mods["global_throughput_mult"]) * cip_multiplier()
 	_buffer_cap = maxf(_bal_f("buffer_base_cap", 100.0) * float(_mods["buffer_cap_mult"]), 1.0)
 	_price_each_f = _bal_f("price_per_part", 1.0) * float(_mods["price_mult"])
+	if _value_add_pricing():
+		# Value-add pricing (balance.value_add_pricing): every unlocked stage adds one
+		# price unit per part — the ToC "throughput = money rate" reading. Makes line
+		# extension a genuine revenue decision instead of a yield penalty.
+		_price_each_f *= maxf(1.0, float(_k_unlocked))
 	_sale_price = BigNum.from_float(_price_each_f)
 	_eff = []
 	for i in stations_def.size():
@@ -853,7 +858,11 @@ func estimate_unlock_delta_rps(station: int) -> float:
 		var eff: Dictionary = _eff[i]
 		suffix_q *= float(eff["quality"])
 		best = minf(best, float(eff["proc_rate"]) * suffix_q)
-	return best * _price_each_f - cur_rps
+	var price_after: float = _price_each_f
+	if _value_add_pricing() and _k_unlocked > 0:
+		# The unlocked line will sell at the (k+1)-station price.
+		price_after = _price_each_f / float(_k_unlocked) * float(_k_unlocked + 1)
+	return best * price_after - cur_rps
 
 
 func _steady_pps_with(override_index: int, override_eff: Dictionary) -> float:
@@ -1098,6 +1107,10 @@ func _num_f(v: Variant, default_value: float) -> float:
 
 func _bal_f(key: String, default_value: float) -> float:
 	return float(balance.get(key, default_value))
+
+
+func _value_add_pricing() -> bool:
+	return bool(balance.get("value_add_pricing", false))
 
 
 func _bal_sub(sub: String, key: String, default_value: Variant) -> Variant:

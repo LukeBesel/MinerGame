@@ -1,6 +1,7 @@
 {
 	"schema_version": 1,
 	"price_per_part": 1.5,
+	"value_add_pricing": true,
 	"starting_money": 15,
 	"tick_rate": 10,
 	"buffer_base_cap": 100,

@@ -44,3 +44,25 @@ word and we change it. Newest at the bottom of each section.
   fully build this at the same time". Phase summaries are reported together at the end.
 - DECISION: Product fiction: the line makes **"gizmos"** through Stamping Press → CNC Lathe →
   Weld Cell → Paint Booth → Assembly Cell → QA & Packout (6 stations, first 3 unlocked).
+
+## Build/integration phase (module agents + integrator)
+
+- DECISION: **Value-add pricing enabled** (`balance.value_add_pricing: true`): parts sell at
+  `price_per_part × price_mults × unlocked_station_count`. Under contract-literal flat pricing,
+  unlocking a quality<1 station strictly reduced revenue — a trap purchase violating pillar #1.
+  The sim agent flagged it and recommended value-add; the data agent had already balanced
+  unlock costs for it. Implemented as a data knob so the sim's hermetic fixtures still exercise
+  flat pricing; the unlock-value estimator accounts for the (k+1)-station price bump.
+  Measured after the switch: first prestige 28.6 min (target 25–50), suite 126/0.
+- DECISION: Boot instances world+HUD **before** the save load — `SaveManager.boot_load()` emits
+  `offline_report` synchronously and the popup must already be subscribed.
+- DECISION (sim): `can_prestige` additionally requires `cip_gain ≥ 1` — no zero-gain resets.
+- DECISION (sim): Station unlocks are strictly sequential (the line is linear).
+- DECISION (sim): Prestige flushes buffer WIP (fiction: you sold the plant); conservation
+  tracking stays exact via a `wip_flushed` counter.
+- DECISION (sim): Achievements are evaluated inside the sim with the same trigger vocabulary as
+  milestones (additive `achievement_unlocked` event).
+- DECISION (juice): Ambience loops are 16 kHz mono (band-limited hum; 44.1 kHz couldn't fit a
+  4 s seamless loop in the 150 KB per-file budget). One-shots stay 44.1 kHz.
+- DECISION (world): In Gemba Walk, Esc exits walk mode (consumed); a future pause menu opens on
+  a second Esc. No initial `camera_mode_changed` at boot — HUD assumes orbit.

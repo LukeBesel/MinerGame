@@ -255,3 +255,20 @@ func test_scrap_events_and_totals() -> void:
 	assert_near(event_sum, e.scrap_total, 0.2, "batched scrap events track the total")
 	var v1: Dictionary = e.get_station_view(1)
 	assert_near(float(v1["scrap_rate"]), 0.5 * 0.2, 0.02, "scrap_rate = proc * (1-q) at steady")
+
+
+func test_value_add_pricing_flag() -> void:
+	var db_va: Dictionary = Autoplayer.fixture_db()
+	db_va["balance"]["value_add_pricing"] = true
+	var flat = _engine()
+	var va = SimEngineScript.new_game(db_va)
+	_run(flat, 60.0)
+	_run(va, 60.0)
+	var flat_earned: float = flat.money_earned.to_float()
+	assert_true(flat_earned > 0.0, "flat engine earned revenue")
+	assert_near(va.money_earned.to_float(), flat_earned * 3.0,
+			flat_earned * 1e-6 + 1e-9,
+			"value-add price = flat x unlocked station count (3)")
+	var next: int = va.next_locked_index()
+	assert_true(va.estimate_unlock_delta_rps(next) > flat.estimate_unlock_delta_rps(next),
+			"unlock valuation includes the (k+1)-station price bump")
