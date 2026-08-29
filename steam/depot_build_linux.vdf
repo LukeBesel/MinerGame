@@ -1,0 +1,14 @@
+// Depot config for the Linux x86_64 build. Content root matches export_presets.cfg's Linux
+// export_path (builds/linux/bottleneck.x86_64) and build.sh/build.ps1's output layout.
+"DepotBuildConfig"
+{
+	"DepotID"		"DEPOT_ID_LINUX"
+	"contentroot"	"../builds/linux/"
+
+	"FileMapping"
+	{
+		"LocalPath"		"*"
+		"DepotPath"		"."
+		"recursive"		"1"
+	}
+}

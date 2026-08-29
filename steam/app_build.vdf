@@ -1,0 +1,29 @@
+// Steamworks SDK content builder script for Bottleneck.
+// Fill in APP_ID and every DEPOT_ID_* below with the real values from the Steamworks app admin
+// (Installations & Depots), then run from this directory:
+//   steamcmd +login <account> +run_app_build "$(pwd)/app_build.vdf" +quit
+// See steam/README.md for the full one-time setup + upload walkthrough.
+"appbuild"
+{
+	"appid"				"APP_ID"
+	"desc"				"Bottleneck automated build"
+
+	// Relative to this file. build.sh/build.ps1 export+zip each platform into ../builds/<os>/ —
+	// depot FileMapping entries below point at those subfolders directly.
+	"buildoutput"		"../builds/steam_build_output/"
+	"contentroot"		"../builds/"
+
+	// Empty = upload to Steamworks as a private, unlisted build (safe default). Set to a branch
+	// name (e.g. "default" for the live branch, or a beta branch) to publish it live from the CLI.
+	"setlive"			""
+
+	"preview"			"0"
+	"local"				""
+
+	"depots"
+	{
+		"DEPOT_ID_WINDOWS"	"depot_build_windows.vdf"
+		"DEPOT_ID_LINUX"	"depot_build_linux.vdf"
+		"DEPOT_ID_MACOS"	"depot_build_macos.vdf"
+	}
+}

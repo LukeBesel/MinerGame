@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  GODOT_TAG: "4.5-stable"
+  GODOT_LOCAL_VERSION: "4.5.stable"
+  GODOT_URL: "https://github.com/godotengine/godot/releases/download/4.5-stable/Godot_v4.5-stable_linux.x86_64.zip"
+  GODOT_TEMPLATES_URL: "https://github.com/godotengine/godot/releases/download/4.5-stable/Godot_v4.5-stable_export_templates.tpz"
+
+jobs:
+  test:
+    name: Headless tests + boot smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache Godot binary
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: ~/godot-bin
+          key: godot-bin-${{ env.GODOT_TAG }}-linux-x86_64
+
+      - name: Download Godot
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/godot-bin"
+          curl -fL -o /tmp/godot.zip "$GODOT_URL"
+          unzip -q /tmp/godot.zip -d "$HOME/godot-bin"
+          mv "$HOME/godot-bin/Godot_v4.5-stable_linux.x86_64" "$HOME/godot-bin/godot"
+          chmod +x "$HOME/godot-bin/godot"
+
+      - name: Run headless test suite
+        run: $HOME/godot-bin/godot --headless --path . -s res://tests/run_tests.gd
+
+      # main.gd's smoke path (BNK_SMOKE=1) waits ~4s of sim time, prints BNK_SMOKE_OK, and calls
+      # get_tree().quit(0) itself -- `timeout` here is purely a safety net for the failure case
+      # (a hang/error before that point), not the normal exit mechanism.
+      - name: Boot smoke test (BNK_SMOKE=1, 60s timeout)
+        run: |
+          BNK_SMOKE=1 timeout 60 "$HOME/godot-bin/godot" --headless --path . | tee smoke.log
+
+      - name: Verify smoke marker
+        run: grep -q "BNK_SMOKE_OK" smoke.log
+
+  # Optional, manual-only: a full platform export needs export templates (500MB+ download) which
+  # is too heavy to run on every push/PR. Trigger it by hand from the Actions tab ("Run workflow")
+  # when you want to sanity-check the export pipeline; it is NOT required to pass CI.
+  export:
+    name: "Platform export (manual only, not required to pass)"
+    if: github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache Godot binary
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: ~/godot-bin
+          key: godot-bin-${{ env.GODOT_TAG }}-linux-x86_64
+
+      - name: Download Godot
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/godot-bin"
+          curl -fL -o /tmp/godot.zip "$GODOT_URL"
+          unzip -q /tmp/godot.zip -d "$HOME/godot-bin"
+          mv "$HOME/godot-bin/Godot_v4.5-stable_linux.x86_64" "$HOME/godot-bin/godot"
+          chmod +x "$HOME/godot-bin/godot"
+
+      - name: Cache export templates
+        id: cache-templates
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/godot/export_templates
+          key: godot-templates-${{ env.GODOT_TAG }}
+
+      # Local template dir name uses DOT notation ("4.5.stable"), unlike the hyphenated release
+      # tag/asset names above -- verified against the version string Godot 4.5 itself reports.
+      - name: Download export templates
+        if: steps.cache-templates.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/.local/share/godot/export_templates"
+          curl -fL -o /tmp/templates.tpz "$GODOT_TEMPLATES_URL"
+          rm -rf /tmp/templates_extracted
+          mkdir -p /tmp/templates_extracted
+          unzip -q /tmp/templates.tpz -d /tmp/templates_extracted
+          rm -rf "$HOME/.local/share/godot/export_templates/$GODOT_LOCAL_VERSION"
+          mv /tmp/templates_extracted/templates "$HOME/.local/share/godot/export_templates/$GODOT_LOCAL_VERSION"
+
+      # Linux + Web only here (cross-exports fine from Linux, no extra toolchain) -- Windows/macOS
+      # can be added the same way via `bash build.sh windows macos` once desired; macOS additionally
+      # needs the manual signing/notarization steps in steam/README.md §5 before it's distributable.
+      - name: Export Linux + Web builds
+        run: |
+          export GODOT_BIN="$HOME/godot-bin/godot"
+          bash build.sh linux web
+
+      - name: Upload build artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bottleneck-builds
+          path: builds/*.zip
+          retention-days: 7

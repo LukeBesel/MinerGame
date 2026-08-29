@@ -1,0 +1,16 @@
+// Depot config for the macOS universal (x86_64 + arm64) build. Content root matches
+// export_presets.cfg's macOS export_path (builds/macos/Bottleneck.app) and build.sh/build.ps1's
+// output layout. Sign + notarize the .app (see steam/README.md §5) BEFORE running this depot —
+// this file just uploads whatever is already in ../builds/macos/.
+"DepotBuildConfig"
+{
+	"DepotID"		"DEPOT_ID_MACOS"
+	"contentroot"	"../builds/macos/"
+
+	"FileMapping"
+	{
+		"LocalPath"		"*"
+		"DepotPath"		"."
+		"recursive"		"1"
+	}
+}
