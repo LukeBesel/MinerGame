@@ -14,9 +14,11 @@ const TAB_KAIZEN := 1
 const TAB_STATS := 2
 const TAB_SETTINGS := 3
 const ALERT_POLL_S := 1.0
+const TITLES := ["ui.tab_skills", "ui.tab_kaizen", "ui.tab_stats", "ui.tab_settings"]
 
 var _tab_btns: Array = []
 var _panels: Array = []
+var _content: PanelContainer = null
 var _active := TAB_SKILLS
 var _alert_left := 0.0
 var _skills_alert := false
@@ -47,12 +49,11 @@ func _ready() -> void:
 	var tab_row := HBoxContainer.new()
 	tab_row.add_theme_constant_override("separation", 2)
 	v.add_child(tab_row)
-	var titles := ["ui.tab_skills", "ui.tab_kaizen", "ui.tab_stats", "ui.tab_settings"]
-	for i in titles.size():
+	for i in TITLES.size():
 		var b := Button.new()
 		b.theme_type_variation = "TabButton"
 		b.toggle_mode = true
-		b.text = L.t(str(titles[i]))
+		b.text = L.t(str(TITLES[i]))
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.clip_text = true
 		UiUtil.min_touch(b)
@@ -61,26 +62,63 @@ func _ready() -> void:
 		tab_row.add_child(b)
 		_tab_btns.append(b)
 
-	var content := PanelContainer.new()
-	content.theme_type_variation = "InsetPanel"
-	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	v.add_child(content)
+	_content = PanelContainer.new()
+	_content.theme_type_variation = "InsetPanel"
+	_content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(_content)
 	for p in _panels:
-		content.add_child(p)
-
-	if _targets != null and _targets.has_method("register"):
-		_targets.register("skills_tab", _target_skills_tab)
+		_content.add_child(p)
 
 	EventBus.sim_stats.connect(_on_sim_stats)
 	_apply_active()
 
 
-func _target_skills_tab() -> Rect2:
+## Global rect of the Skills tab button — the DESKTOP "skills_tab" onboarding target
+## (hud.gd registers a mode-aware dispatcher that calls this).
+func skills_tab_rect() -> Rect2:
 	if _tab_btns.size() > TAB_SKILLS:
 		var b: Button = _tab_btns[TAB_SKILLS]
 		if is_instance_valid(b) and b.is_visible_in_tree():
 			return b.get_global_rect()
 	return Rect2()
+
+
+## Localized title for tab i (mobile overlay headers reuse the tab names).
+func tab_title(i: int) -> String:
+	if i >= 0 and i < TITLES.size():
+		return L.t(str(TITLES[i]))
+	return ""
+
+
+## MOBILE: lend one tab's panel to a full-screen overlay. The panel keeps all of its
+## signal wiring; it is simply reparented. Give it back with return_panel(i).
+func borrow_panel(i: int) -> Control:
+	if i < 0 or i >= _panels.size():
+		return null
+	var p: Variant = _panels[i]
+	if p == null or not is_instance_valid(p):
+		return null
+	var ctl := p as Control
+	if ctl.get_parent() != null:
+		ctl.get_parent().remove_child(ctl)
+	ctl.visible = true
+	return ctl
+
+
+## Put a borrowed tab panel back into this panel's content slot and restore the
+## active-tab visibility state.
+func return_panel(i: int) -> void:
+	if i < 0 or i >= _panels.size() or _content == null:
+		return
+	var p: Variant = _panels[i]
+	if p == null or not is_instance_valid(p):
+		return
+	var ctl := p as Control
+	if ctl.get_parent() != null and ctl.get_parent() != _content:
+		ctl.get_parent().remove_child(ctl)
+	if ctl.get_parent() == null:
+		_content.add_child(ctl)
+	_apply_active()
 
 
 func _on_tab_pressed(i: int) -> void:

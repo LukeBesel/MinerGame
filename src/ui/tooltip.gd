@@ -6,6 +6,7 @@ extends Control
 
 const UiTheme = preload("res://src/ui/ui_theme.gd")
 const UiUtil = preload("res://src/ui/ui_util.gd")
+const Layout = preload("res://src/ui/layout.gd")
 
 const HOVER_DELAY := 0.4
 const FOCUS_DELAY := 0.35
@@ -23,6 +24,7 @@ var _mode := MODE_HOVER
 var _timer := 0.0
 var _active: Control = null
 var _suppressed := false		# onboarding dim up: tooltips must not draw above it
+var _layout_mode := Layout.MODE_DESKTOP
 
 
 ## Suppress all tooltips (used while the onboarding overlay dims the screen — this layer
@@ -30,6 +32,17 @@ var _suppressed := false		# onboarding dim up: tooltips must not draw above it
 func set_suppressed(on: bool) -> void:
 	_suppressed = on
 	if on:
+		_candidate = null
+		_hide_tip()
+
+
+## hud.gd: in the MOBILE layout tooltips come from long-press only (hover is emulated
+## noise on touch, and focus tips would pop under stray taps).
+func set_layout_mode(mode: int) -> void:
+	if _layout_mode == mode:
+		return
+	_layout_mode = mode
+	if mode == Layout.MODE_MOBILE:
 		_candidate = null
 		_hide_tip()
 
@@ -151,6 +164,8 @@ func _on_control_input(event: InputEvent, c: Control) -> void:
 func _begin(c: Control, mode: int, delay: float) -> void:
 	if _suppressed or not _providers.has(c):
 		return
+	if _layout_mode == Layout.MODE_MOBILE and mode != MODE_TOUCH:
+		return	# mobile: long-press only
 	_candidate = c
 	_mode = mode
 	_timer = delay

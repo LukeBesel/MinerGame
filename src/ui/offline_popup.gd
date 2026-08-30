@@ -7,7 +7,9 @@ const UiTheme = preload("res://src/ui/ui_theme.gd")
 const UiUtil = preload("res://src/ui/ui_util.gd")
 
 const COUNT_S := 1.5
+const PANEL_W := 420.0
 
+var _panel: PanelContainer
 var _panel_title: Label
 var _away_label: Label
 var _money_label: Label
@@ -32,10 +34,13 @@ func _ready() -> void:
 	var center := CenterContainer.new()
 	UiUtil.full_rect(center)
 	add_child(center)
-	var panel := PanelContainer.new()
-	panel.theme_type_variation = "ModalPanel"
-	panel.custom_minimum_size = Vector2(420, 0)
-	center.add_child(panel)
+	_panel = PanelContainer.new()
+	_panel.theme_type_variation = "ModalPanel"
+	_panel.custom_minimum_size = Vector2(PANEL_W, 0)
+	center.add_child(_panel)
+	resized.connect(_clamp_panel)
+	_clamp_panel()
+	var panel := _panel
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 10)
 	panel.add_child(v)
@@ -78,6 +83,12 @@ func _ready() -> void:
 	v.add_child(_ok_btn)
 
 	EventBus.offline_report.connect(_on_offline_report)
+
+
+## Keep the modal usable on narrow design spaces (phone portrait, 360×640).
+func _clamp_panel() -> void:
+	if _panel != null and size.x > 0.0:
+		_panel.custom_minimum_size.x = minf(PANEL_W, size.x - 32.0)
 
 
 func _on_offline_report(report: Dictionary) -> void:

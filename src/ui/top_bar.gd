@@ -1,26 +1,37 @@
-## TopBar — slim full-width strip: money (tween-counted), parts/sec, OEE, current
+## TopBar — full-width strip: money (tween-counted), parts/sec, OEE, current
 ## bottleneck (named + "!" icon, clickable), and Kaizen Points. Renders from
-## EventBus.sim_stats only; never polls the sim per frame.
+## EventBus.sim_stats only; never polls the sim per frame. Two layouts: DESKTOP is the
+## classic one-row strip; MOBILE stacks a compact money/pps/KP row over a slim
+## OEE + full-width bottleneck chip row (hud.gd drives set_layout_mode).
 extends PanelContainer
 
 const UiTheme = preload("res://src/ui/ui_theme.gd")
 const UiUtil = preload("res://src/ui/ui_util.gd")
+const Layout = preload("res://src/ui/layout.gd")
 const TooltipScript = preload("res://src/ui/tooltip.gd")
 
 const MONEY_SIZE_SIMPLE := 26	# simple mode bumps the key numeral (≥ 26 px)
+const MONEY_SIZE_MOBILE := 30	# mobile headline money
 
 var _tooltip = null
 var _targets = null
 
 var _money_value: Label
 var _money_box: Control
+var _pps_box: Control
 var _pps_value: Label
+var _oee_box: Control
 var _oee_value: Label
 var _bn_chip: PanelContainer
 var _bn_glyph: Label
 var _bn_value: Label
+var _kp_box: Control
 var _kp_value: Label
+var _row1: HBoxContainer
+var _row2: HBoxContainer
+var _spacer: Control
 
+var _layout_mode := Layout.MODE_DESKTOP
 var _bn_index := -1
 var _last_money = null			# BigNum of the last rendered tick
 var _countup_hold := 0.0		# seconds left where Juice.count_up owns the label
@@ -37,35 +48,41 @@ func _ready() -> void:
 	theme_type_variation = "TopBarPanel"
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 22)
-	add_child(row)
+	var rows := VBoxContainer.new()
+	rows.add_theme_constant_override("separation", 4)
+	add_child(rows)
+	_row1 = HBoxContainer.new()
+	_row1.add_theme_constant_override("separation", 22)
+	rows.add_child(_row1)
+	_row2 = HBoxContainer.new()
+	_row2.add_theme_constant_override("separation", 10)
+	_row2.visible = false
+	rows.add_child(_row2)
 
 	var money_block := _make_block("ui.money", "ui.tip_money")
 	_money_box = money_block["box"]
 	_money_value = money_block["value"]
 	_money_value.theme_type_variation = "MoneyLabel"
-	row.add_child(_money_box)
 
 	var pps_block := _make_block("ui.parts_per_sec", "ui.tip_pps")
+	_pps_box = pps_block["box"]
 	_pps_value = pps_block["value"]
-	row.add_child(pps_block["box"])
 
 	var oee_block := _make_block("ui.oee", "ui.tip_oee")
+	_oee_box = oee_block["box"]
 	_oee_value = oee_block["value"]
-	row.add_child(oee_block["box"])
 
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_child(spacer)
+	_spacer = Control.new()
+	_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	_bn_chip = _make_bottleneck_chip()
-	row.add_child(_bn_chip)
 
 	var kp_block := _make_glyph_block("◆", UiTheme.COL_AMBER, "ui.kaizen_points", "ui.tip_kp")
+	_kp_box = kp_block["box"]
 	_kp_value = kp_block["value"]
-	row.add_child(kp_block["box"])
+
+	_arrange_rows()
 
 	if _targets != null and _targets.has_method("register"):
 		_targets.register("top_bar_money", _target_money)
@@ -78,17 +95,52 @@ func _ready() -> void:
 	_refresh_once()
 
 
+## hud.gd: switch between the one-row DESKTOP strip and the two-row MOBILE bar.
+func set_layout_mode(mode: int) -> void:
+	if _layout_mode == mode:
+		return
+	_layout_mode = mode
+	if _row1 != null:
+		_arrange_rows()
+		_apply_money_size(UiUtil.ui_mode())
+
+
+## Distribute the stat blocks over the rows for the current layout mode.
+func _arrange_rows() -> void:
+	var mobile := _layout_mode == Layout.MODE_MOBILE
+	for block in [_money_box, _pps_box, _oee_box, _spacer, _bn_chip, _kp_box]:
+		var c := block as Control
+		if c != null and c.get_parent() != null:
+			c.get_parent().remove_child(c)
+	if mobile:
+		for c in [_money_box, _spacer, _pps_box, _kp_box]:
+			_row1.add_child(c)
+		for c in [_oee_box, _bn_chip]:
+			_row2.add_child(c)
+		_bn_chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_bn_chip.custom_minimum_size.y = UiTheme.TOUCH_MIN_MOBILE
+	else:
+		for c in [_money_box, _pps_box, _oee_box, _spacer, _bn_chip, _kp_box]:
+			_row1.add_child(c)
+		_bn_chip.size_flags_horizontal = Control.SIZE_FILL
+		_bn_chip.custom_minimum_size.y = 0.0
+	_row2.visible = mobile
+
+
 func _target_money() -> Rect2:
 	if _money_box != null and _money_box.is_visible_in_tree():
 		return _money_box.get_global_rect()
 	return Rect2()
 
 
-## Simple mode bumps the headline money numeral to ≥ 26 px (mode is the resolved string).
+## Simple mode bumps the headline money numeral to ≥ 26 px (mode is the resolved string);
+## the MOBILE layout bumps it further regardless of ui_mode.
 func _apply_money_size(mode: String) -> void:
 	if _money_value == null:
 		return
-	if mode == "advanced":
+	if _layout_mode == Layout.MODE_MOBILE:
+		_money_value.add_theme_font_size_override("font_size", MONEY_SIZE_MOBILE)
+	elif mode == "advanced":
 		_money_value.remove_theme_font_size_override("font_size")
 	else:
 		_money_value.add_theme_font_size_override("font_size", MONEY_SIZE_SIMPLE)

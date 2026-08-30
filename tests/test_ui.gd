@@ -1,15 +1,18 @@
 ## UI module tests — hermetic: exercises only pure static helpers (no autoloads, no scene
 ## tree, no nodes): the coach hint evaluator/picker, number formatting, status glyphs,
-## ui-mode/fix-label resolution, order formatting, onboarding step/spotlight math, the
-## target registry, and the code-built theme resource.
+## ui-mode/fix-label resolution, order formatting, onboarding step/spotlight/bubble math,
+## responsive layout-mode resolution, touch-camera gesture math, the target registry, and
+## the code-built theme resource (desktop + mobile font scales).
 extends "res://tests/test_framework.gd"
 
 const Coach = preload("res://src/ui/coach.gd")
 const UiUtil = preload("res://src/ui/ui_util.gd")
 const UiTheme = preload("res://src/ui/ui_theme.gd")
+const Layout = preload("res://src/ui/layout.gd")
 const OrderWidget = preload("res://src/ui/order_widget.gd")
 const Onboarding = preload("res://src/ui/onboarding.gd")
 const OnboardTargets = preload("res://src/ui/onboard_targets.gd")
+const CameraRig = preload("res://src/world/camera_rig.gd")
 const BigNum = preload("res://src/sim/big_num.gd")
 const SimTypes = preload("res://src/sim/sim_types.gd")
 
@@ -226,6 +229,107 @@ func test_theme_builds() -> void:
 	assert_eq(String(t.get_type_variation_base("AccentButton")), "Button")
 	assert_eq(String(t.get_type_variation_base("CardPanel")), "PanelContainer")
 	assert_eq(String(t.get_type_variation_base("SkillNodeReady")), "SkillNode")
+
+
+func test_layout_mode_resolution() -> void:
+	assert_true(Layout.is_portrait(Vector2(394, 844)), "phone portrait")
+	assert_true(Layout.is_portrait(Vector2(800, 800)), "square counts as portrait (1.0 < 1.05)")
+	assert_false(Layout.is_portrait(Vector2(844, 394)), "phone landscape")
+	assert_false(Layout.is_portrait(Vector2(1280, 720)))
+	assert_false(Layout.is_portrait(Vector2(0, 0)), "degenerate window is not portrait")
+	assert_true(Layout.scale_size_for(Vector2(394, 844)) == Layout.SCALE_PORTRAIT)
+	assert_true(Layout.scale_size_for(Vector2(1280, 720)) == Layout.SCALE_LANDSCAPE)
+	assert_true(Layout.scale_size_for(Vector2(844, 394)) == Layout.SCALE_LANDSCAPE)
+	assert_eq(Layout.resolve_mode(Vector2(394, 844)), Layout.MODE_MOBILE, "phone portrait -> MOBILE")
+	assert_eq(Layout.resolve_mode(Vector2(768, 1024)), Layout.MODE_MOBILE, "tablet portrait -> MOBILE")
+	assert_eq(Layout.resolve_mode(Vector2(1280, 720)), Layout.MODE_DESKTOP)
+	assert_eq(Layout.resolve_mode(Vector2(844, 394)), Layout.MODE_DESKTOP, "phone landscape uses the desktop layout")
+	assert_eq(Layout.resolve_mode(Vector2(1280, 800)), Layout.MODE_DESKTOP, "Steam Deck stays desktop")
+	assert_eq(Layout.resolve_mode(Vector2(3440, 1440)), Layout.MODE_DESKTOP, "ultrawide stays desktop")
+
+
+func test_layout_design_size() -> void:
+	# Exact 16:9 on the landscape base: unchanged.
+	var d: Vector2 = Layout.design_size(Vector2(1280, 720), Vector2(1280, 720))
+	assert_near(d.x, 1280.0)
+	assert_near(d.y, 720.0)
+	# Phone portrait window on the portrait base: width pinned, height expands.
+	d = Layout.design_size(Vector2(394, 844), Vector2(720, 1280))
+	assert_near(d.x, 720.0)
+	assert_near(d.y, 720.0 * 844.0 / 394.0, 0.01)
+	# Wider than base: height pinned, width expands.
+	d = Layout.design_size(Vector2(2560, 720), Vector2(1280, 720))
+	assert_near(d.y, 720.0)
+	assert_near(d.x, 2560.0)
+	# Narrower landscape (4:3): width pinned to base, height expands.
+	d = Layout.design_size(Vector2(1024, 768), Vector2(1280, 720))
+	assert_near(d.x, 1280.0)
+	assert_near(d.y, 960.0)
+	# Degenerate input falls back to the base.
+	d = Layout.design_size(Vector2.ZERO, Vector2(1280, 720))
+	assert_near(d.x, 1280.0)
+	assert_near(d.y, 720.0)
+
+
+func test_camera_touch_math() -> void:
+	assert_near(CameraRig.pinch_zoom(20.0, 100.0, 200.0), 10.0, 1e-6, "fingers apart = zoom in")
+	assert_near(CameraRig.pinch_zoom(20.0, 100.0, 50.0), 40.0, 1e-6, "fingers together = zoom out")
+	assert_near(CameraRig.pinch_zoom(20.0, 100.0, 10.0), 48.0, 1e-6, "clamped at wheel max")
+	assert_near(CameraRig.pinch_zoom(20.0, 100.0, 100000.0), 6.0, 1e-6, "clamped at wheel min")
+	assert_near(CameraRig.pinch_zoom(20.0, 0.0, 50.0), 20.0, 1e-6, "degenerate baseline = keep distance")
+	assert_near(CameraRig.pinch_zoom(999.0, 0.0, 0.0), 48.0, 1e-6, "degenerate still clamps")
+	assert_true(CameraRig.is_tap(5.0, 200))
+	assert_false(CameraRig.is_tap(15.0, 200), "moved too far to be a tap")
+	assert_false(CameraRig.is_tap(5.0, 400), "held too long to be a tap")
+	assert_near(CameraRig.frame_dist_scale(16.0 / 9.0), 1.0, 1e-6, "landscape framing unchanged")
+	assert_near(CameraRig.frame_dist_scale(1.6), 1.0, 1e-6)
+	assert_true(CameraRig.frame_dist_scale(0.467) > 3.0, "portrait zooms out to fit the line")
+	assert_near(CameraRig.frame_dist_scale(0.1), 4.0, 1e-6, "zoom-out factor capped")
+	assert_near(CameraRig.frame_dist_scale(0.0), 1.0, 1e-6, "degenerate aspect ignored")
+
+
+func test_onboarding_bubble_fit() -> void:
+	assert_near(Onboarding.bubble_wrap_width(1280.0), 380.0, 1e-6, "desktop keeps the design width")
+	assert_near(Onboarding.bubble_wrap_width(720.0), 380.0, 1e-6, "portrait design space still fits it")
+	assert_near(Onboarding.bubble_wrap_width(360.0), 300.0, 1e-6, "narrow spaces shrink the wrap width")
+	assert_near(Onboarding.bubble_wrap_width(50.0), 120.0, 1e-6, "wrap width floor")
+	# The width-0 mismeasure that ballooned the bubble into a full-screen column must cap.
+	var c: Vector2 = Onboarding.clamp_bubble_size(Vector2(412.0, 2356.0), Vector2(720.0, 1542.0))
+	assert_near(c.x, 412.0)
+	assert_near(c.y, 1542.0 - 16.0, 1e-6, "giant measurement capped to the viewport")
+	c = Onboarding.clamp_bubble_size(Vector2(500.0, 200.0), Vector2(360.0, 640.0))
+	assert_near(c.x, 360.0 - 16.0, 1e-6, "width capped on tiny spaces")
+	assert_near(c.y, 200.0)
+
+
+func test_pick_hint_exclusions() -> void:
+	var hints := [
+		{"id": "hint_gemba", "priority": 9, "cond": {"type": "always"}},
+		{"id": "other", "priority": 1, "cond": {"type": "always"}},
+	]
+	var picked: Dictionary = Coach.pick_hint(hints, {}, {}, 0.0, ["hint_gemba"])
+	assert_eq(str(picked.get("id")), "other", "excluded (keyboard-only) ids are skipped on touch")
+	picked = Coach.pick_hint(hints, {}, {}, 0.0)
+	assert_eq(str(picked.get("id")), "hint_gemba", "no exclusions by default")
+	picked = Coach.pick_hint(hints, {}, {}, 0.0, ["hint_gemba", "other"])
+	assert_true(picked.is_empty(), "everything excluded -> empty pick")
+
+
+func test_theme_font_scale_and_mobile_chrome() -> void:
+	var base: Theme = UiTheme.build()
+	var big: Theme = UiTheme.build(UiTheme.MOBILE_FONT_SCALE)
+	assert_eq(base.default_font_size, UiTheme.FONT_BODY)
+	assert_eq(big.default_font_size, int(roundf(UiTheme.FONT_BODY * UiTheme.MOBILE_FONT_SCALE)))
+	for variation in ["TitleLabel", "MoneyLabel", "TinyLabel", "DimLabel"]:
+		assert_true(big.get_font_size("font_size", variation) > base.get_font_size("font_size", variation),
+				variation + " scales up in MOBILE")
+	assert_true(big.get_font_size("font_size", "Button") > base.get_font_size("font_size", "Button"))
+	# MOBILE chrome variations exist in both themes.
+	for t in [base, big]:
+		assert_true(t.has_stylebox("panel", "SheetPanel"), "bottom sheet body style")
+		assert_true(t.has_stylebox("panel", "SheetHandle"), "sheet handle style")
+		assert_true(t.has_stylebox("panel", "NavPanel"), "bottom nav bar style")
+	assert_eq(String(base.get_type_variation_base("NavButton")), "TabButton")
 
 
 func test_theme_simple_mode_variations() -> void:

@@ -286,6 +286,132 @@ round-trip, FIX IT label states, order lifecycle incl. duplicate-signal guards.
 - `BNK_SMOKE=1` boot (fresh profile, onboarding overlay live): `BNK_SMOKE_OK`, zero
   script errors.
 
+## Responsive/mobile pass (2026-08-30)
+
+Owner-reported phone bugs (portrait web build: tiny UI, desktop panels squeezing the
+width, onboarding drawing a broken narrow column, no touch camera) fixed. New files:
+`layout.gd` (pure mode/scale math), `bottom_sheet.gd`, `bottom_nav.gd`,
+`mobile_overlay.gd`; touched: `hud.gd`, `ui_theme.gd`, `top_bar.gd`, `coach.gd`,
+`order_widget.gd`, `station_panel.gd`, `right_panel.gd`, `toasts.gd`, `tooltip.gd`,
+`onboarding.gd`, `offline_popup.gd`, `settings_panel.gd`, `src/world/camera_rig.gd`,
+`tests/test_ui.gd`. (New .gd files have no `.uid` yet — generated on the integrator's
+next editor/import run; runtime `load()` by path doesn't need them.)
+
+### Layout modes + orientation-aware content scale
+
+- `layout.gd` (pure statics, tested): `is_portrait(win)` (aspect < 1.05),
+  `scale_size_for(win)` → 720×1280 portrait / 1280×720 landscape,
+  `design_size(win, base)` (canvas_items + expand math), `resolve_mode(win)` →
+  `MODE_DESKTOP|MODE_MOBILE` where MOBILE = portrait OR design width < 1000. Under the
+  expand aspect, landscape design width never drops below 1280, so in practice
+  MOBILE ⇔ portrait-ish windows (phone/tablet portrait); phone landscape and Steam Deck
+  stay DESKTOP.
+- `hud.gd` connects `viewport.size_changed` → `_relayout()`: writes
+  `window.content_scale_size` (guarded, re-entrancy flag — the write re-fires
+  size_changed), resolves the mode, and on change broadcasts `set_layout_mode(mode)`
+  to top bar / coach / orders / toasts / tooltip, reparents the station panel, toggles
+  chrome, swaps the root theme. Placement (`_place_all`) re-runs on every resize and on
+  sheet toggle. Fully live: browser rotation/resize switches at runtime (verified with
+  mid-run window resizes both directions, onboarding active and not).
+- Themes: `UiTheme.build(font_scale)`; MOBILE uses `MOBILE_FONT_SCALE` (1.15) — every
+  themed font size scales, styleboxes/metrics identical; one cached Theme per scale.
+  New constants `TOUCH_MIN_MOBILE` (48) + variations `SheetPanel`, `SheetHandle`,
+  `NavPanel`, `NavButton`.
+
+### MOBILE layout (DESKTOP untouched — rects byte-identical to before)
+
+- TopBar: two rows via block reparenting (`_arrange_rows`) — money (30 px) + spacer +
+  parts/sec + KP, then OEE + full-width bottleneck chip (≥48 px, tap → station_selected).
+  hud strip height 112 (56 desktop).
+- Coach + rush-order: full-width strips (margins 8) under the top bar;
+  `set_layout_mode` + `_layout_panel()` stretch the panels to the strip width (desktop
+  keeps the centered-anchor behavior; geometry verified identical).
+- Bottom sheet (`bottom_sheet.gd`): hud-anchored above the nav. Collapsed 190 px =
+  handle (▲ + station count, `ui.sheet_stations` with "▦ n" fallback) + bottleneck
+  summary row + full-width FIX IT (56 px, mirrors the card's label/disabled logic,
+  `apply_best_fix` + squash/audio). Expanded = 65 % of design height: the EXISTING
+  StationPanel is reparented into the sheet (`attach/detach_station_list`) — cards at
+  full width, all logic reused. The sheet FIX IT stays pinned under the list;
+  `station_panel.set_external_fix(true)` suppresses the per-card FIX IT while hosted so
+  there is exactly one. Handle: tap toggles, vertical swipe ≥24 px picks its direction
+  (gui_input, so GUI consumption keeps swipes off the camera), ui_accept works.
+- Bottom nav (`bottom_nav.gd`): 4 two-line buttons (≥48 px, glyph + existing ui.tab_*
+  labels) at the very bottom. Tap → `mobile_overlay.gd` opens the EXISTING right-panel
+  tab full-screen (borrow_panel/return_panel reparent the live panel instances — no
+  forked logic; the settings save-modal still parents to hud's Overlay above it).
+  Big ✕ (56 px) and ui_cancel close; tapping the open tab's nav button closes too;
+  switching to DESKTOP closes + returns the panel first.
+- Toasts: bottom-center, `set_bottom_clearance` keeps them above nav + current sheet
+  height. Tooltips: MOBILE accepts long-press only (hover/focus starts ignored).
+- Modals fit small spaces: offline popup width clamps to viewport−32; save modal clamps
+  to overlay−24 (both verified at 360×640 window / 720×1280 design).
+- Touch niceties: settings' "Tab — walk the floor" hint is omitted when
+  `DisplayServer.is_touchscreen_available()`; the coach skips keyboard-only hints there
+  too (`KEYBOARD_HINT_IDS = ["hint_gemba"]`, exclude list param on `pick_hint` — if
+  hints.json ever grows a `requires` field, use that instead).
+
+### Onboarding dim bug — root cause + fix
+
+The owner's "broken narrow column" was NOT the dim rects: the four side rects/blockers
+were already recomputed per frame and covered the viewport (pixel-verified). The column
+was the text BUBBLE: `_show_step` ran on `load_completed` before the first layout pass,
+so `fit_label` + `reset_size()` measured the wrapping Label at width 0 — a wrapped
+Label reports its height for the CURRENT width, i.e. one line per word ⇒ the
+PanelContainer was sized 412×2356 and nothing ever shrank it (containers only grow to
+min). On desktop it hung off-screen (y=8) and went unnoticed; on phones it centered as
+a full-height column. Fix: `_fit_bubble()` pins the wrap width to the current viewport
+(`bubble_wrap_width`, pure), re-measures at the real width, clamps to the viewport
+(`clamp_bubble_size`, pure) and re-fits every frame while active. Additionally all
+dim/blocker/bubble geometry now derives from `_bounds()` = the CURRENT
+`viewport.get_visible_rect()` (never control size), with `viewport.size_changed` →
+`relayout()` and hud calling `relayout()` on mode switches/sheet toggles — rotation
+mid-onboarding re-tiles instantly (frame-verified both directions).
+Spotlight targets in MOBILE: hud now owns mode-aware dispatchers for `fix_button`
+(sheet's FIX IT ↔ promoted card's), `bottleneck_card` (expanded card ↔ sheet summary),
+`skills_tab` (nav Skills button ↔ right-panel tab) and `world_bottleneck` (free 3D box
+between top strips and sheet). station_panel/right_panel expose public
+`fix_button_rect/bottleneck_card_rect/skills_tab_rect` instead of self-registering;
+`top_bar_money` and `coach` register as before (coach's synthetic rect spans the strip
+in MOBILE). Skip/Next are 48 px tall now.
+
+### Touch camera (camera_rig.gd — all desktop behavior + prior fixes intact)
+
+- Gesture map (orbit mode, `_unhandled_input` so GUI-consumed touches never reach it):
+  1-finger drag = orbit (0.0045·sens); tap (<10 px, <300 ms, never multi) = station
+  select via the existing `_queue_click` raycast; 2-finger pinch = zoom clamped to the
+  wheel's 6–48 m (`pinch_zoom`, pure); 2-finger drag = pan (each finger's relative at
+  half weight ≈ midpoint delta, so symmetric pinches don't pan). Per-index tracking in
+  `_touch_pts/_touch_start/_touch_ms`; releases for untracked indices ignored (press
+  went to GUI); 3+ fingers just cancel tap semantics.
+- Emulated-mouse guard: mouse events with `device == InputEvent.DEVICE_ID_EMULATION`
+  or arriving while any touch is tracked are dropped in orbit handling — touch wins,
+  real desktop mice unaffected.
+- Edge pan disabled entirely when `DisplayServer.is_touchscreen_available()`.
+- `frame_line` multiplies distance by `frame_dist_scale(aspect)` (pure; 1.0 at ≥1.6,
+  capped ×4) so the portrait boot shows the whole line; big aspect changes (>20 % —
+  i.e. rotation) re-frame the last extent, small desktop resizes never touch a
+  user-adjusted camera. Walk mode untouched (keyboard-only; hints hidden on touch).
+- Verified from rendered frames + EventBus probes: tap → `station_selected(1)` +
+  selection ring; drag orbits; pinch zooms in; handle-swipe expands the sheet with the
+  camera provably unmoved; a touch on FIX IT buys (emulated mouse → GUI) with zero
+  camera events.
+
+### Validation (this pass)
+
+- Full suite: **161 passed / 0 failed, 1780 asserts** (test_ui.gd now 21 tests — new
+  hermetic coverage: layout-mode/design-size resolution, pinch/tap/framing math,
+  bubble wrap/clamp math, pick_hint exclusions, font-scale theme + mobile chrome).
+- `BNK_SMOKE=1` headless boot: `BNK_SMOKE_OK`, zero script errors. §2 filtered
+  check-only: empty output on all 16 src/ui files + camera_rig.gd.
+- Frame-verified via xvfb software-GL (temp harness, deleted): 394×844 portrait boot
+  (onboarding full-screen dim + spotlight on sheet FIX IT + readable 1.15× text),
+  FIX IT tap-buy auto-advancing the on_upgrade step, sheet collapse/expand (tap and
+  swipe), Skills/Settings full-screen overlays + ✕/ui_cancel close, toasts above the
+  sheet, 844×394 phone-landscape (desktop layout per mode rule), 1280×720 desktop
+  regression (rects byte-identical incl. coach/toast/panel geometry; only diff = the
+  bubble bugfix), live rotation portrait↔landscape mid-onboarding, 360×640 offline
+  popup + save modal.
+
 ## Validation status (at hand-off)
 
 - All 15 `src/ui/*.gd` files pass the §2 check-only command with **empty** output.

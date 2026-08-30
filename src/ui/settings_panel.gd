@@ -74,12 +74,15 @@ func _ready() -> void:
 
 	_section(v, "ui.settings_controls")
 	_add_slider(v, "ui.settings_camera_sensitivity", "camera_sensitivity", 0.2, 3.0, 0.05, 1.0)
-	var hint := Label.new()
-	hint.theme_type_variation = "DimLabel"
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	hint.text = L.t("ui.walk_hint") + "\n" + L.t("ui.orbit_hint")
-	v.add_child(hint)
+	# Keyboard/mouse control hints (Tab for Gemba walk etc.) are meaningless on a
+	# touchscreen device — omit them there.
+	if not DisplayServer.is_touchscreen_available():
+		var hint := Label.new()
+		hint.theme_type_variation = "DimLabel"
+		hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hint.text = L.t("ui.walk_hint") + "\n" + L.t("ui.orbit_hint")
+		v.add_child(hint)
 
 	_section(v, "ui.settings_save")
 	var save_row := HBoxContainer.new()
@@ -242,6 +245,13 @@ func _build_modal() -> void:
 	var panel := PanelContainer.new()
 	panel.theme_type_variation = "ModalPanel"
 	panel.custom_minimum_size = Vector2(560, 360)
+	# Fit narrow design spaces (phone portrait): clamp to the modal layer's width/height.
+	var clamp_modal := func() -> void:
+		if _modal.size.x > 0.0:
+			panel.custom_minimum_size = Vector2(
+					minf(560.0, _modal.size.x - 24.0), minf(360.0, _modal.size.y - 24.0))
+	_modal.resized.connect(clamp_modal)
+	clamp_modal.call()
 	center.add_child(panel)
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 10)

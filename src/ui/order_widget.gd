@@ -7,6 +7,7 @@ extends Control
 
 const UiTheme = preload("res://src/ui/ui_theme.gd")
 const UiUtil = preload("res://src/ui/ui_util.gd")
+const Layout = preload("res://src/ui/layout.gd")
 
 const STATE_HIDDEN := 0
 const STATE_ACTIVE := 1
@@ -28,6 +29,30 @@ var _state := STATE_HIDDEN
 var _active_id := ""
 var _seen_data := false			# saw at least one non-empty order dict this run
 var _tween: Tween = null
+var _layout_mode := Layout.MODE_DESKTOP
+
+
+## hud.gd: DESKTOP centers the bar on this control's anchor point; MOBILE stretches it
+## across this control's full (hud-anchored) width.
+func set_layout_mode(mode: int) -> void:
+	if _layout_mode == mode:
+		return
+	_layout_mode = mode
+	if _panel != null and _panel.visible:
+		_layout_panel()
+
+
+func _layout_panel() -> void:
+	if _panel == null:
+		return
+	if _layout_mode == Layout.MODE_MOBILE:
+		_panel.custom_minimum_size.x = maxf(size.x, 0.0)
+		_panel.reset_size()
+		_panel.position.x = 0.0
+	else:
+		_panel.custom_minimum_size.x = 0.0
+		_panel.reset_size()
+		_panel.position.x = -_panel.size.x * 0.5
 
 
 # ---------------------------------------------------------------- pure helpers (tested)
@@ -112,11 +137,17 @@ func _ready() -> void:
 	_reward.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	right.add_child(_reward)
 
+	resized.connect(_on_resized)
 	EventBus.order_started.connect(_on_order_started)
 	EventBus.order_completed.connect(_on_order_completed)
 	EventBus.order_failed.connect(_on_order_failed)
 	EventBus.sim_stats.connect(_on_sim_stats)
 	EventBus.game_reset.connect(_hide_now)
+
+
+func _on_resized() -> void:
+	if _panel != null and _panel.visible:
+		_layout_panel()
 
 
 # ---------------------------------------------------------------- signals / state machine
@@ -194,8 +225,7 @@ func _render(d: Dictionary) -> void:
 			UiTheme.COL_RED if secs < TIME_WARN_S else UiTheme.COL_TEXT)
 	UiUtil.set_label(_reward, UiUtil.trf("ui.order_reward",
 			[UiUtil.trim_float(float(d.get("reward_mult", 1.0)))]))
-	_panel.reset_size()
-	_panel.position.x = -_panel.size.x * 0.5	# y belongs to the slide tween
+	_layout_panel()	# x/width per layout mode; y belongs to the slide tween
 
 
 func _begin_show(instant: bool) -> void:
@@ -203,8 +233,8 @@ func _begin_show(instant: bool) -> void:
 	_state = STATE_ACTIVE
 	_panel.theme_type_variation = "OrderPanel"
 	_panel.visible = true
-	_panel.reset_size()
-	_panel.position = Vector2(-_panel.size.x * 0.5, 0.0)
+	_layout_panel()
+	_panel.position.y = 0.0
 	if instant or UiUtil.reduce_motion():
 		_panel.modulate = Color(1, 1, 1, 1)
 		return

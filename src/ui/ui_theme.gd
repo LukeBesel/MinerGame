@@ -31,6 +31,8 @@ const FONT_BODY := 15
 const FONT_TITLE := 16
 const FONT_BIG := 21
 const TOUCH_MIN := 36.0
+const TOUCH_MIN_MOBILE := 48.0		# minimum touch target in the MOBILE layout
+const MOBILE_FONT_SCALE := 1.15		# MOBILE mode bumps every themed font size by this
 const RADIUS := 6
 
 
@@ -76,10 +78,16 @@ static func bold_font() -> FontVariation:
 	return f
 
 
-## Build the full HUD theme. Called once by hud.gd and assigned to the root Control.
-static func build() -> Theme:
+static func _fs(px: int, scale: float) -> int:
+	return int(roundf(float(px) * scale))
+
+
+## Build the full HUD theme. Called by hud.gd and assigned to the root Control.
+## font_scale scales every themed font size (MOBILE layout passes MOBILE_FONT_SCALE);
+## metrics/styleboxes are unchanged so the two themes stay visually interchangeable.
+static func build(font_scale := 1.0) -> Theme:
 	var t := Theme.new()
-	t.default_font_size = FONT_BODY
+	t.default_font_size = _fs(FONT_BODY, font_scale)
 	var bold := bold_font()
 
 	# ---- Panels ----
@@ -102,20 +110,24 @@ static func build() -> Theme:
 	# Rush-order widget bar (+ green flash state on completion).
 	_panel_variation(t, "OrderPanel", with_shadow(flat(COL_CARD, COL_BORDER_LIGHT, 1, 8, 12.0, 8.0)))
 	_panel_variation(t, "OrderPanelGood", with_shadow(flat(COL_GREEN_BG, COL_GREEN, 1, 8, 12.0, 8.0)))
+	# MOBILE layout: bottom sheet body, its drag handle, and the bottom nav bar.
+	_panel_variation(t, "SheetPanel", with_shadow(flat(COL_PANEL, COL_BORDER_LIGHT, 1, 12, 10.0, 8.0), 12))
+	_panel_variation(t, "SheetHandle", flat(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 0, RADIUS, 6.0, 2.0))
+	_panel_variation(t, "NavPanel", flat(COL_PANEL_2, COL_BORDER, 1, 0, 4.0, 4.0))
 
 	# ---- Labels ----
 	t.set_color("font_color", "Label", COL_TEXT)
-	t.set_font_size("font_size", "Label", FONT_BODY)
-	_label_variation(t, "TitleLabel", FONT_TITLE, COL_TEXT, bold)
-	_label_variation(t, "MoneyLabel", FONT_BIG, COL_TEXT, bold)
-	_label_variation(t, "BigValueLabel", 24, COL_AMBER, bold)
-	_label_variation(t, "ValueLabel", FONT_BODY, COL_TEXT, bold)
-	_label_variation(t, "DimLabel", FONT_SMALL, COL_TEXT_DIM, null)
-	_label_variation(t, "TinyLabel", FONT_TINY, COL_TEXT_DIM, null)
-	_label_variation(t, "AccentLabel", FONT_BODY, COL_AMBER, bold)
-	_label_variation(t, "GoodLabel", FONT_BODY, COL_GREEN, bold)
-	_label_variation(t, "BadLabel", FONT_BODY, COL_RED, bold)
-	_label_variation(t, "GlyphLabel", FONT_TITLE, COL_TEXT, bold)
+	t.set_font_size("font_size", "Label", _fs(FONT_BODY, font_scale))
+	_label_variation(t, "TitleLabel", _fs(FONT_TITLE, font_scale), COL_TEXT, bold)
+	_label_variation(t, "MoneyLabel", _fs(FONT_BIG, font_scale), COL_TEXT, bold)
+	_label_variation(t, "BigValueLabel", _fs(24, font_scale), COL_AMBER, bold)
+	_label_variation(t, "ValueLabel", _fs(FONT_BODY, font_scale), COL_TEXT, bold)
+	_label_variation(t, "DimLabel", _fs(FONT_SMALL, font_scale), COL_TEXT_DIM, null)
+	_label_variation(t, "TinyLabel", _fs(FONT_TINY, font_scale), COL_TEXT_DIM, null)
+	_label_variation(t, "AccentLabel", _fs(FONT_BODY, font_scale), COL_AMBER, bold)
+	_label_variation(t, "GoodLabel", _fs(FONT_BODY, font_scale), COL_GREEN, bold)
+	_label_variation(t, "BadLabel", _fs(FONT_BODY, font_scale), COL_RED, bold)
+	_label_variation(t, "GlyphLabel", _fs(FONT_TITLE, font_scale), COL_TEXT, bold)
 
 	# ---- Buttons ----
 	t.set_stylebox("normal", "Button", flat(COL_BTN, COL_BORDER_LIGHT, 1, RADIUS, 12.0, 6.0))
@@ -130,7 +142,7 @@ static func build() -> Theme:
 	t.set_color("font_hover_pressed_color", "Button", COL_TEXT)
 	t.set_color("font_focus_color", "Button", COL_TEXT)
 	t.set_color("font_disabled_color", "Button", COL_TEXT_DISABLED)
-	t.set_font_size("font_size", "Button", FONT_BODY)
+	t.set_font_size("font_size", "Button", _fs(FONT_BODY, font_scale))
 
 	# Big amber call-to-action.
 	t.set_type_variation("AccentButton", "Button")
@@ -147,11 +159,11 @@ static func build() -> Theme:
 
 	# Simple mode's big FIX IT call-to-action (amber, two-line capable).
 	t.set_type_variation("FixButton", "AccentButton")
-	t.set_font_size("font_size", "FixButton", 17)
+	t.set_font_size("font_size", "FixButton", _fs(17, font_scale))
 
 	# Low-key text button (mode toggle): transparent until hovered.
 	t.set_type_variation("GhostButton", "Button")
-	t.set_font_size("font_size", "GhostButton", FONT_SMALL)
+	t.set_font_size("font_size", "GhostButton", _fs(FONT_SMALL, font_scale))
 	t.set_stylebox("normal", "GhostButton", flat(Color(0, 0, 0, 0), COL_BORDER, 1, RADIUS, 10.0, 4.0))
 	t.set_stylebox("hover", "GhostButton", flat(COL_BTN_HOVER, COL_BORDER_LIGHT, 1, RADIUS, 10.0, 4.0))
 	t.set_stylebox("pressed", "GhostButton", flat(COL_BTN_PRESS, COL_BORDER_LIGHT, 1, RADIUS, 10.0, 4.0))
@@ -177,11 +189,15 @@ static func build() -> Theme:
 
 	# Buy-multiplier segment buttons (small toggles).
 	t.set_type_variation("MultButton", "TabButton")
-	t.set_font_size("font_size", "MultButton", FONT_SMALL)
+	t.set_font_size("font_size", "MultButton", _fs(FONT_SMALL, font_scale))
+
+	# MOBILE bottom-nav buttons (two-line glyph + label; pressed = open overlay).
+	t.set_type_variation("NavButton", "TabButton")
+	t.set_font_size("font_size", "NavButton", _fs(FONT_SMALL, font_scale))
 
 	# Station upgrade buttons (two-line: name+level / cost).
 	t.set_type_variation("UpgradeButton", "Button")
-	t.set_font_size("font_size", "UpgradeButton", FONT_SMALL)
+	t.set_font_size("font_size", "UpgradeButton", _fs(FONT_SMALL, font_scale))
 	t.set_stylebox("normal", "UpgradeButton", flat(COL_BTN, COL_BORDER_LIGHT, 1, RADIUS, 9.0, 5.0))
 	t.set_stylebox("hover", "UpgradeButton", flat(COL_BTN_HOVER, COL_BORDER_LIGHT, 1, RADIUS, 9.0, 5.0))
 	t.set_stylebox("pressed", "UpgradeButton", flat(COL_BTN_PRESS, COL_BORDER_LIGHT, 1, RADIUS, 9.0, 5.0))
@@ -195,7 +211,7 @@ static func build() -> Theme:
 
 	# Skill tree nodes.
 	t.set_type_variation("SkillNode", "Button")
-	t.set_font_size("font_size", "SkillNode", FONT_TINY)
+	t.set_font_size("font_size", "SkillNode", _fs(FONT_TINY, font_scale))
 	t.set_stylebox("normal", "SkillNode", flat(COL_BTN, COL_BORDER_LIGHT, 1, RADIUS, 6.0, 4.0))
 	t.set_stylebox("hover", "SkillNode", flat(COL_BTN_HOVER, COL_BORDER_LIGHT, 1, RADIUS, 6.0, 4.0))
 	t.set_stylebox("pressed", "SkillNode", flat(COL_BTN_PRESS, COL_BORDER_LIGHT, 1, RADIUS, 6.0, 4.0))
@@ -249,7 +265,7 @@ static func build() -> Theme:
 	t.set_stylebox("background", "ProgressBar", flat(COL_INPUT, COL_BORDER, 1, 3, 2.0, 2.0))
 	t.set_stylebox("fill", "ProgressBar", flat(COL_AMBER, Color(0, 0, 0, 0), 0, 3, 0.0, 0.0))
 	t.set_color("font_color", "ProgressBar", COL_TEXT)
-	t.set_font_size("font_size", "ProgressBar", FONT_TINY)
+	t.set_font_size("font_size", "ProgressBar", _fs(FONT_TINY, font_scale))
 
 	# ---- LineEdit / TextEdit ----
 	for edit_type in ["LineEdit", "TextEdit"]:

@@ -25,11 +25,21 @@ var _selected := -1
 var _mult := 1
 var _ui_mode := "simple"
 var _bn_index := -1
+var _external_fix := false		# MOBILE: the bottom sheet shows the one FIX IT button
 
 
 func setup(tooltip, targets = null) -> void:
 	_tooltip = tooltip
 	_targets = targets
+
+
+## While this panel is hosted by the bottom sheet, the sheet already pins a persistent
+## FIX IT button — suppress the per-card one (the promoted card styling stays).
+func set_external_fix(on: bool) -> void:
+	if _external_fix == on:
+		return
+	_external_fix = on
+	_rerender()
 
 
 func _ready() -> void:
@@ -90,10 +100,6 @@ func _ready() -> void:
 	_cards_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_scroll.add_child(_cards_box)
 
-	if _targets != null and _targets.has_method("register"):
-		_targets.register("bottleneck_card", _target_bottleneck_card)
-		_targets.register("fix_button", _target_fix_button)
-
 	EventBus.sim_stats.connect(_on_sim_stats)
 	EventBus.station_selected.connect(_on_station_selected)
 	EventBus.buy_multiplier_changed.connect(_on_mult_changed)
@@ -143,6 +149,7 @@ func _rerender() -> void:
 
 
 # ---------------------------------------------------------------- onboarding targets
+# (hud.gd registers mode-aware dispatchers that call these in the DESKTOP layout)
 
 func _bn_card() -> Variant:
 	if _bn_index >= 0 and _bn_index < _cards.size():
@@ -152,14 +159,16 @@ func _bn_card() -> Variant:
 	return null
 
 
-func _target_bottleneck_card() -> Rect2:
+## Global rect of the current bottleneck's card (Rect2() when hidden/none).
+func bottleneck_card_rect() -> Rect2:
 	var card: Variant = _bn_card()
 	if card != null and card.is_visible_in_tree():
 		return card.get_global_rect()
 	return Rect2()
 
 
-func _target_fix_button() -> Rect2:
+## Global rect of the promoted card's visible FIX IT button (Rect2() when hidden).
+func fix_button_rect() -> Rect2:
 	var card: Variant = _bn_card()
 	if card != null and card.has_method("fix_button_rect"):
 		return card.fix_button_rect()
@@ -222,7 +231,7 @@ func _on_sim_stats(stats: Dictionary) -> void:
 	_bn_index = int(stats.get("bottleneck", -1))
 	var advanced := _ui_mode == "advanced"
 	var fix: Dictionary = {}
-	if not advanced and _bn_index >= 0:
+	if not advanced and _bn_index >= 0 and not _external_fix:
 		fix = UiUtil.best_fix_view()	# once per tick; keeps the FIX IT label fresh
 	for i in stations.size():
 		var view_v: Variant = stations[i]

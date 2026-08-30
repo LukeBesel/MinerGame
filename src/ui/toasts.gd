@@ -1,10 +1,12 @@
-## Toasts — bottom-right notification stack: request_toast, save completed/failed,
-## achievement unlocked, and milestone reached (+KP, slightly celebratory). Auto-fade,
-## never blocks clicks into the 3D world.
+## Toasts — notification stack: request_toast, save completed/failed, achievement
+## unlocked, and milestone reached (+KP, slightly celebratory). Auto-fade, never blocks
+## clicks into the 3D world. DESKTOP stacks bottom-right; MOBILE stacks bottom-center
+## above the bottom sheet (hud.gd drives set_layout_mode / set_bottom_clearance).
 extends Control
 
 const UiTheme = preload("res://src/ui/ui_theme.gd")
 const UiUtil = preload("res://src/ui/ui_util.gd")
+const Layout = preload("res://src/ui/layout.gd")
 
 const MAX_TOASTS := 5
 const LIFETIME_S := 3.5
@@ -12,6 +14,8 @@ const LIFETIME_BIG_S := 5.0
 const TOAST_W := 300.0
 
 var _box: VBoxContainer
+var _layout_mode := Layout.MODE_DESKTOP
+var _clearance := 8.0			# MOBILE: keep the stack above sheet + nav
 
 
 func _ready() -> void:
@@ -23,9 +27,9 @@ func _ready() -> void:
 	_box.alignment = BoxContainer.ALIGNMENT_END
 	_box.add_theme_constant_override("separation", 6)
 	_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	UiUtil.anchor_box(_box, 1.0, 1.0, 1.0, 1.0, -TOAST_W - 8.0, -8.0, -8.0, -8.0)
 	_box.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	_box.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_apply_box_anchor()
 	add_child(_box)
 
 	EventBus.request_toast.connect(_on_request_toast)
@@ -33,6 +37,34 @@ func _ready() -> void:
 	EventBus.save_failed.connect(_on_save_failed)
 	EventBus.achievement_unlocked.connect(_on_achievement)
 	EventBus.milestone_reached.connect(_on_milestone)
+
+
+## hud.gd: DESKTOP = bottom-right stack, MOBILE = bottom-center above the sheet.
+func set_layout_mode(mode: int) -> void:
+	if _layout_mode == mode:
+		return
+	_layout_mode = mode
+	_apply_box_anchor()
+
+
+## MOBILE: distance from the screen bottom to the toast stack (sheet + nav + gap).
+func set_bottom_clearance(px: float) -> void:
+	if is_equal_approx(_clearance, px):
+		return
+	_clearance = px
+	_apply_box_anchor()
+
+
+func _apply_box_anchor() -> void:
+	if _box == null:
+		return
+	if _layout_mode == Layout.MODE_MOBILE:
+		var half := TOAST_W * 0.5
+		UiUtil.anchor_box(_box, 0.5, 1.0, 0.5, 1.0, -half, -_clearance, half, -_clearance)
+		_box.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	else:
+		UiUtil.anchor_box(_box, 1.0, 1.0, 1.0, 1.0, -TOAST_W - 8.0, -8.0, -8.0, -8.0)
+		_box.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 
 
 func _on_request_toast(text: String) -> void:

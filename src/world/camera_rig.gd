@@ -1,6 +1,8 @@
 ## CameraRig — default orbit management camera (RMB orbit, wheel zoom, MMB/edge pan, smooth
 ## lerp, auto-frames the unlocked line) plus the first-person Gemba Walk mode on `toggle_walk`
 ## (Tab). Both modes raycast-click stations → EventBus.station_selected; emits camera_mode_changed.
+## Touch: 1-finger drag orbits, tap selects, 2-finger pinch zooms, 2-finger drag pans;
+## edge pan is disabled on touchscreens and touch always wins over emulated mouse events.
 extends Node3D
 
 const WorldLib = preload("res://src/world/world_lib.gd")
@@ -17,6 +19,10 @@ const EDGE_PX := 16.0
 const EDGE_PAN_IDLE_MS := 1500	# edge pan only while the mouse has moved recently
 const WALK_SPEED := 4.3
 const WALK_EYE := 1.62
+const TAP_MAX_PX := 10.0		# a touch that moved less than this ...
+const TAP_MAX_MS := 300			# ... and released quicker than this = station-select tap
+const TOUCH_ORBIT_FACTOR := 0.0045
+const FRAME_ASPECT_REF := 1.6	# below this viewport aspect, frame_line zooms out to fit
 
 var mode: int = SimTypes.CAMERA_ORBIT
 
@@ -48,6 +54,45 @@ var _walk_pitch := 0.0
 var _bob_t := 0.0
 var _sens := 1.0
 var _reduce_motion := false
+
+# Touch gesture state (per-index; only touches whose press reached _unhandled_input —
+# i.e. not consumed by a GUI Control — are tracked).
+var _touchscreen := false
+var _touch_pts: Dictionary = {}		# index -> latest position
+var _touch_start: Dictionary = {}	# index -> press position
+var _touch_ms: Dictionary = {}		# index -> press tick (msec)
+var _multi_gesture := false			# once 2+ fingers were down, releases never tap-select
+var _pinch_sep := 0.0				# finger separation when the 2-finger gesture began
+var _pinch_dist := 0.0				# _dist when the 2-finger gesture began
+
+# Last framed line extent (re-framed when the viewport aspect changes class, e.g. rotation).
+var _frame_min_x := 0.0
+var _frame_max_x := 0.0
+var _frame_aspect := 0.0
+var _framed := false
+
+
+# ---------------------------------------------------------------- pure gesture math (tested)
+
+## Two-finger pinch zoom: the camera distance scales with start/current finger
+## separation, clamped exactly like the mouse wheel.
+static func pinch_zoom(base_dist: float, start_sep: float, cur_sep: float) -> float:
+	if start_sep <= 0.0 or cur_sep <= 0.0:
+		return clampf(base_dist, DIST_MIN, DIST_MAX)
+	return clampf(base_dist * start_sep / cur_sep, DIST_MIN, DIST_MAX)
+
+
+## True when a touch press/release pair still counts as a station-select tap.
+static func is_tap(moved_px: float, held_ms: int) -> bool:
+	return moved_px < TAP_MAX_PX and held_ms < TAP_MAX_MS
+
+
+## Distance multiplier so the framed line still fits horizontally on narrow (portrait)
+## viewports: 1.0 at/above the 1.6 reference aspect, growing as the view narrows.
+static func frame_dist_scale(aspect: float) -> float:
+	if aspect <= 0.01:
+		return 1.0
+	return clampf(FRAME_ASPECT_REF / aspect, 1.0, 4.0)
 
 
 func _ready() -> void:
@@ -86,17 +131,45 @@ func _ready() -> void:
 	add_child(_walk_body)
 	_walk_body.position = Vector3(7.0, 0.2, 4.6)
 
+	_touchscreen = DisplayServer.is_touchscreen_available()
 	_refresh_settings("")
 	EventBus.settings_changed.connect(_on_settings_changed)
+	get_viewport().size_changed.connect(_on_viewport_resized)
 	_apply_orbit_transform()
 
 
 ## Re-frame the orbit camera around the current unlocked line extent (called by FactoryWorld
-## on rebuild and on station_unlocked, so the view grows with the factory).
+## on rebuild and on station_unlocked, so the view grows with the factory). On narrow
+## (portrait) viewports the distance is scaled up so the whole line still fits.
 func frame_line(min_x: float, max_x: float) -> void:
+	_frame_min_x = min_x
+	_frame_max_x = max_x
+	_frame_aspect = _viewport_aspect()
+	_framed = true
 	_target = Vector3((min_x + max_x) * 0.5 + 1.0, 0.9, 0.5)
-	_dist = clampf((max_x - min_x) * 0.55 + 8.0, 14.0, DIST_MAX)
+	var dist := clampf((max_x - min_x) * 0.55 + 8.0, 14.0, DIST_MAX)
+	_dist = clampf(dist * frame_dist_scale(_frame_aspect), 14.0, DIST_MAX)
 	_clamp_target()
+
+
+## Rotation / big aspect changes re-frame the last extent (small desktop window resizes
+## never fight a user-adjusted camera).
+func _on_viewport_resized() -> void:
+	if not _framed or mode != SimTypes.CAMERA_ORBIT:
+		return
+	var aspect := _viewport_aspect()
+	if _frame_aspect > 0.0 and absf(aspect - _frame_aspect) / _frame_aspect > 0.2:
+		frame_line(_frame_min_x, _frame_max_x)
+
+
+func _viewport_aspect() -> float:
+	var vp := get_viewport()
+	if vp == null:
+		return FRAME_ASPECT_REF
+	var s: Vector2 = vp.get_visible_rect().size
+	if s.y <= 0.0:
+		return FRAME_ASPECT_REF
+	return s.x / s.y
 
 
 func _on_settings_changed(key: String, _value: Variant) -> void:
@@ -145,6 +218,18 @@ func _unhandled_input(event: InputEvent) -> void:
 			_queue_click(_viewport_center())
 		return
 	# --- Orbit mode ---
+	# Touch first: gestures own the camera on touch devices. Mouse events emulated from
+	# touches (device == DEVICE_ID_EMULATION, and anything arriving while fingers are
+	# down) are ignored so the camera is never double-driven.
+	if event is InputEventScreenTouch:
+		_handle_touch(event as InputEventScreenTouch)
+		return
+	if event is InputEventScreenDrag:
+		_handle_touch_drag(event as InputEventScreenDrag)
+		return
+	if (event is InputEventMouseButton or event is InputEventMouseMotion) \
+			and (event.device == InputEvent.DEVICE_ID_EMULATION or not _touch_pts.is_empty()):
+		return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		match mb.button_index:
@@ -179,6 +264,68 @@ func _unhandled_input(event: InputEvent) -> void:
 			_clamp_target()
 
 
+# ---------------------------------------------------------------- touch gestures
+
+## Press/release bookkeeping. Only presses that reached _unhandled_input are tracked, so
+## touches consumed by GUI Controls never move the camera; stray releases are ignored.
+func _handle_touch(ev: InputEventScreenTouch) -> void:
+	if ev.pressed:
+		_touch_pts[ev.index] = ev.position
+		_touch_start[ev.index] = ev.position
+		_touch_ms[ev.index] = Time.get_ticks_msec()
+		if _touch_pts.size() == 2:
+			_multi_gesture = true
+			_begin_pinch()
+		elif _touch_pts.size() > 2:
+			_multi_gesture = true
+		return
+	if not _touch_pts.has(ev.index):
+		return
+	var start: Vector2 = _touch_start.get(ev.index, ev.position)
+	var held := Time.get_ticks_msec() - int(_touch_ms.get(ev.index, 0))
+	var single: bool = _touch_pts.size() == 1 and not _multi_gesture
+	_touch_pts.erase(ev.index)
+	_touch_start.erase(ev.index)
+	_touch_ms.erase(ev.index)
+	if single and is_tap(ev.position.distance_to(start), held):
+		_queue_click(ev.position)	# tap = station select (same raycast path as clicks)
+	if _touch_pts.size() == 2:
+		_begin_pinch()	# 3 fingers down to 2: restart the pinch baseline
+	elif _touch_pts.is_empty():
+		_multi_gesture = false
+
+
+## 1 finger = orbit; 2 fingers = pinch zoom + pan (each finger's relative at half
+## weight approximates the midpoint delta, so a symmetric pinch pans nothing).
+func _handle_touch_drag(ev: InputEventScreenDrag) -> void:
+	if not _touch_pts.has(ev.index):
+		return
+	_touch_pts[ev.index] = ev.position
+	if _touch_pts.size() == 1 and not _multi_gesture:
+		_yaw = wrapf(_yaw - ev.relative.x * TOUCH_ORBIT_FACTOR * _sens, -PI, PI)
+		_pitch = clampf(_pitch - ev.relative.y * TOUCH_ORBIT_FACTOR * _sens, PITCH_MIN, PITCH_MAX)
+	elif _touch_pts.size() == 2:
+		var keys: Array = _touch_pts.keys()
+		var a: Vector2 = _touch_pts[keys[0]]
+		var b: Vector2 = _touch_pts[keys[1]]
+		_dist = pinch_zoom(_pinch_dist, _pinch_sep, a.distance_to(b))
+		var yaw_b := Basis(Vector3.UP, _cur_yaw)
+		var right := yaw_b * Vector3.RIGHT
+		var fwd := yaw_b * Vector3(0.0, 0.0, -1.0)
+		_target += (right * -ev.relative.x + fwd * ev.relative.y) * _cur_dist * 0.0016 * 0.5
+		_clamp_target()
+
+
+func _begin_pinch() -> void:
+	var keys: Array = _touch_pts.keys()
+	if keys.size() < 2:
+		return
+	var a: Vector2 = _touch_pts[keys[0]]
+	var b: Vector2 = _touch_pts[keys[1]]
+	_pinch_sep = maxf(a.distance_to(b), 1.0)
+	_pinch_dist = _dist
+
+
 func _process(delta: float) -> void:
 	if mode == SimTypes.CAMERA_ORBIT:
 		_edge_pan(delta)
@@ -199,6 +346,8 @@ func _apply_orbit_transform() -> void:
 
 
 func _edge_pan(delta: float) -> void:
+	if _touchscreen:
+		return	# no cursor parking on touch devices — edge pan would fight gestures
 	if _orbiting or _panning or Input.mouse_mode != Input.MOUSE_MODE_VISIBLE:
 		return
 	var vp := get_viewport()

@@ -5,6 +5,7 @@ extends Control
 
 const UiTheme = preload("res://src/ui/ui_theme.gd")
 const UiUtil = preload("res://src/ui/ui_util.gd")
+const Layout = preload("res://src/ui/layout.gd")
 const SimTypes = preload("res://src/sim/sim_types.gd")
 
 const MIN_SHOW_S := 3.0			# a shown hint holds the board at least this long
@@ -14,14 +15,44 @@ const DEFAULT_COOLDOWN_S := 30.0
 
 const HIDDEN_TARGET_SIZE := Vector2(360.0, 52.0)	# synthetic onboarding rect while hidden
 
+## Hints that instruct a keyboard action (Tab = Gemba walk) — meaningless on touch
+## devices, so they are skipped when a touchscreen is present. (If hints.json ever grows
+## a `requires` field this list should give way to it.)
+const KEYBOARD_HINT_IDS := ["hint_gemba"]
+
 var _panel: PanelContainer
 var _text: Label
 var _targets = null
 var _suppressed := false		# onboarding overlay up: don't evaluate/show hints
+var _layout_mode := Layout.MODE_DESKTOP
 
 
 func setup(targets = null) -> void:
 	_targets = targets
+
+
+## hud.gd: DESKTOP centers the Andon panel on this control's anchor point; MOBILE
+## stretches it across this control's full (hud-anchored) width.
+func set_layout_mode(mode: int) -> void:
+	if _layout_mode == mode:
+		return
+	_layout_mode = mode
+	if _panel != null and _panel.visible:
+		_layout_panel()
+
+
+## Place/size the visible panel for the current layout mode.
+func _layout_panel() -> void:
+	if _panel == null:
+		return
+	if _layout_mode == Layout.MODE_MOBILE:
+		_panel.custom_minimum_size.x = maxf(size.x, 0.0)
+		_panel.reset_size()
+		_panel.position.x = 0.0
+	else:
+		_panel.custom_minimum_size.x = 0.0
+		_panel.reset_size()
+		_panel.position.x = -_panel.size.x * 0.5
 
 var _starved_s: Dictionary = {}		# station index -> seconds continuously starved
 var _bn_index := -1
@@ -65,8 +96,9 @@ static func eval_condition(cond: Dictionary, ctx: Dictionary) -> bool:
 
 
 ## Pick the winning hint: condition true, off cooldown, highest priority (ties → first).
-## Returns {} when nothing qualifies.
-static func pick_hint(hints: Array, ctx: Dictionary, cooldowns: Dictionary, now: float) -> Dictionary:
+## Returns {} when nothing qualifies. exclude_ids: hint ids never picked (touch devices
+## exclude keyboard-only hints).
+static func pick_hint(hints: Array, ctx: Dictionary, cooldowns: Dictionary, now: float, exclude_ids: Array = []) -> Dictionary:
 	var best: Dictionary = {}
 	var best_priority := -2147483648
 	for h in hints:
@@ -74,7 +106,7 @@ static func pick_hint(hints: Array, ctx: Dictionary, cooldowns: Dictionary, now:
 			continue
 		var hd: Dictionary = h
 		var hid := str(hd.get("id", ""))
-		if hid == "" or now < float(cooldowns.get(hid, 0.0)):
+		if hid == "" or now < float(cooldowns.get(hid, 0.0)) or exclude_ids.has(hid):
 			continue
 		var cond: Variant = hd.get("cond", {})
 		if typeof(cond) != TYPE_DICTIONARY or not eval_condition(cond, ctx):
@@ -122,16 +154,25 @@ func _ready() -> void:
 	if _targets != null and _targets.has_method("register"):
 		_targets.register("coach", _target_rect)
 
+	resized.connect(_on_resized)
 	EventBus.sim_stats.connect(_on_sim_stats)
 	EventBus.game_reset.connect(_on_game_reset)
 
 
+func _on_resized() -> void:
+	if _panel != null and _panel.visible:
+		_layout_panel()
+
+
 ## Onboarding target: the visible Andon panel, or (it is suppressed while the overlay is
-## up) a synthetic rect centered on the board's anchor point so the step still points here.
+## up) a synthetic rect on the board's anchor so the step still points here. DESKTOP
+## anchors are a centered point; MOBILE spans this control's full strip width.
 func _target_rect() -> Rect2:
 	if _panel != null and _panel.visible and _panel.is_visible_in_tree():
 		return _panel.get_global_rect()
 	if is_inside_tree():
+		if _layout_mode == Layout.MODE_MOBILE and size.x > 0.0:
+			return Rect2(global_position, Vector2(size.x, HIDDEN_TARGET_SIZE.y))
 		return Rect2(global_position - Vector2(HIDDEN_TARGET_SIZE.x * 0.5, 0.0), HIDDEN_TARGET_SIZE)
 	return Rect2()
 
@@ -241,7 +282,8 @@ func _drive_board(_stats: Dictionary) -> void:
 		elif now - _false_since >= STALE_HIDE_S:
 			_hide_now()
 
-	var candidate := pick_hint(UiUtil.db_list("hints"), ctx, _cooldowns, now)
+	var exclude: Array = KEYBOARD_HINT_IDS if DisplayServer.is_touchscreen_available() else []
+	var candidate := pick_hint(UiUtil.db_list("hints"), ctx, _cooldowns, now, exclude)
 	if candidate.is_empty():
 		return
 	if _current.is_empty():
@@ -259,10 +301,13 @@ func _show(hint: Dictionary, now: float) -> void:
 	_false_since = -1.0
 	_cooldowns[str(hint.get("id", ""))] = now + float(hint.get("cooldown_s", DEFAULT_COOLDOWN_S))
 	UiUtil.set_label(_text, text)
-	UiUtil.fit_label(_text, MAX_TEXT_W)
+	var text_w := MAX_TEXT_W
+	if _layout_mode == Layout.MODE_MOBILE and size.x > 0.0:
+		text_w = maxf(size.x - 120.0, 160.0)
+	UiUtil.fit_label(_text, text_w)
 	_panel.visible = true
-	_panel.reset_size()
-	_panel.position = Vector2(-_panel.size.x * 0.5, 0.0)
+	_layout_panel()
+	_panel.position.y = 0.0
 	if not UiUtil.reduce_motion():
 		_panel.modulate = Color(1, 1, 1, 0)
 		var from_y := -14.0

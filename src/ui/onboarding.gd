@@ -6,6 +6,9 @@
 ## steps hide Next and auto-advance on EventBus.station_upgraded. Skip is always visible,
 ## Esc also skips; skip/finish writes onboarding_done=true (guarded). Clicks pass through
 ## the hole so the spotlit control stays usable. Reduce-motion: spotlight snaps.
+## Every rect (dim, blockers, bubble) derives from the CURRENT viewport rect and is
+## re-derived per frame + on viewport resize / layout-mode switches, so rotation and
+## content-scale changes can never strand a stale layout.
 extends Control
 
 const UiTheme = preload("res://src/ui/ui_theme.gd")
@@ -17,6 +20,7 @@ const HOLE_PAD := 10.0
 const HOLE_RADIUS := 12.0
 const DIM_COLOR := Color(0.0, 0.0, 0.0, 0.62)
 const BUBBLE_MAX_W := 380.0
+const BUBBLE_MARGIN_W := 44.0	# ModalPanel h-margins + slack between text and panel edge
 const BUBBLE_GAP := 14.0
 const EDGE := 8.0
 const SMOOTH_RATE := 14.0		# spotlight follow speed (1/s); ignored under reduce-motion
@@ -106,6 +110,19 @@ static func side_rects(bounds: Rect2, hole: Rect2) -> Array:
 	return [top, bottom, left, right]
 
 
+## Text wrap width for the bubble on a given viewport width (pure, tested): the design
+## max, shrunk on narrow screens so bubble + margins always fit with EDGE padding.
+static func bubble_wrap_width(viewport_w: float) -> float:
+	return clampf(viewport_w - 2.0 * EDGE - BUBBLE_MARGIN_W, 120.0, BUBBLE_MAX_W)
+
+
+## Clamp a desired bubble size so the bubble always fits the viewport (pure, tested).
+static func clamp_bubble_size(want: Vector2, bounds_size: Vector2) -> Vector2:
+	return Vector2(
+			minf(want.x, maxf(bounds_size.x - 2.0 * EDGE, 40.0)),
+			minf(want.y, maxf(bounds_size.y - 2.0 * EDGE, 40.0)))
+
+
 # ---------------------------------------------------------------- build
 
 func setup(targets) -> void:
@@ -119,6 +136,7 @@ func _ready() -> void:
 	visible = false
 	set_process(false)
 	resized.connect(queue_redraw)
+	get_viewport().size_changed.connect(relayout)
 
 	for i in 4:
 		var b := Control.new()
@@ -144,7 +162,7 @@ func _ready() -> void:
 	_skip_btn = Button.new()
 	_skip_btn.theme_type_variation = "GhostButton"
 	_skip_btn.text = L.t("ui.skip")
-	_skip_btn.custom_minimum_size = Vector2(84, 44)
+	_skip_btn.custom_minimum_size = Vector2(84, UiTheme.TOUCH_MIN_MOBILE)
 	_skip_btn.pressed.connect(_on_skip_pressed)
 	row.add_child(_skip_btn)
 	var spacer := Control.new()
@@ -153,7 +171,7 @@ func _ready() -> void:
 	row.add_child(spacer)
 	_next_btn = Button.new()
 	_next_btn.theme_type_variation = "AccentButton"
-	_next_btn.custom_minimum_size = Vector2(108, 44)
+	_next_btn.custom_minimum_size = Vector2(108, UiTheme.TOUCH_MIN_MOBILE)
 	_next_btn.pressed.connect(_on_next_pressed)
 	row.add_child(_next_btn)
 
@@ -168,6 +186,28 @@ func _ready() -> void:
 
 	EventBus.load_completed.connect(_on_load_completed)
 	EventBus.station_upgraded.connect(_on_station_upgraded)
+
+
+## The overlay's working rect in local coordinates, derived from the CURRENT viewport
+## rect every time (never a cached size — content-scale flips and browser resizes must
+## re-tile the dim immediately, and this control sits at the canvas origin).
+func _bounds() -> Rect2:
+	var vp := get_viewport()
+	if vp == null:
+		return Rect2(Vector2.ZERO, size)
+	return Rect2(-global_position, vp.get_visible_rect().size)
+
+
+## Full re-derive + redraw of dim, blockers and bubble (viewport resize, rotation,
+## layout-mode switches). Safe to call any time; no-op while inactive.
+func relayout() -> void:
+	if not _active:
+		return
+	_update_hole(0.0)
+	_fit_bubble()
+	_layout_blockers()
+	_position_bubble()
+	queue_redraw()
 
 
 # ---------------------------------------------------------------- flow
@@ -200,15 +240,11 @@ func _advance() -> void:
 func _show_step() -> void:
 	var step := _current_step()
 	UiUtil.set_label(_text, L.t(str(step.get("text_key", ""))))
-	UiUtil.fit_label(_text, BUBBLE_MAX_W)
 	var with_next := shows_next(step)
 	_next_btn.visible = with_next
 	if with_next:
 		UiUtil.set_btn(_next_btn, L.t(next_label_key(_steps, _index)))
-	_bubble.reset_size()
-	_update_hole(0.0)
-	_layout_blockers()
-	_position_bubble()
+	relayout()
 	if with_next:
 		_next_btn.grab_focus()
 	else:
@@ -260,6 +296,7 @@ func _process(delta: float) -> void:
 	if not _active:
 		return
 	_update_hole(delta)
+	_fit_bubble()
 	_layout_blockers()
 	_position_bubble()
 
@@ -301,8 +338,25 @@ func _local_hole() -> Rect2:
 	return Rect2(_hole_shown.position - global_position, _hole_shown.size)
 
 
+## Keep the bubble exactly at its (viewport-clamped) minimum size. A wrapping Label
+## measured before its first layout pass reports one line per word (width 0), which once
+## ballooned the bubble into a full-screen column — so the wrap width is pinned to the
+## current viewport and the panel is re-fitted every frame while the overlay is active.
+func _fit_bubble() -> void:
+	var bounds := _bounds()
+	var wrap_w := bubble_wrap_width(bounds.size.x)
+	if _text.autowrap_mode != TextServer.AUTOWRAP_WORD_SMART:
+		_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if _text.custom_minimum_size.x != wrap_w:
+		_text.custom_minimum_size = Vector2(wrap_w, 0)
+		_text.size = Vector2(wrap_w, 0)	# measure the wrap height at the real width now
+	var want := clamp_bubble_size(_bubble.get_minimum_size(), bounds.size)
+	if not _bubble.size.is_equal_approx(want):
+		_bubble.size = want
+
+
 func _layout_blockers() -> void:
-	var rects: Array = side_rects(Rect2(Vector2.ZERO, size), _local_hole())
+	var rects: Array = side_rects(_bounds(), _local_hole())
 	for i in _blockers.size():
 		var b: Control = _blockers[i]
 		var r: Rect2 = rects[i] if i < rects.size() else Rect2()
@@ -313,27 +367,28 @@ func _layout_blockers() -> void:
 
 func _position_bubble() -> void:
 	var sz := _bubble.size
-	var bounds := size
+	var bounds := _bounds()
 	var hole := _local_hole()
-	var pos := (bounds - sz) * 0.5
+	var pos := bounds.position + (bounds.size - sz) * 0.5
 	if hole.size.y > 0.0:
 		var x := clampf(hole.position.x + (hole.size.x - sz.x) * 0.5,
-				EDGE, maxf(EDGE, bounds.x - sz.x - EDGE))
+				bounds.position.x + EDGE, maxf(bounds.position.x + EDGE, bounds.end.x - sz.x - EDGE))
 		var below := hole.end.y + BUBBLE_GAP
 		var above := hole.position.y - BUBBLE_GAP - sz.y
-		if below + sz.y <= bounds.y - EDGE:
+		if below + sz.y <= bounds.end.y - EDGE:
 			pos = Vector2(x, below)
-		elif above >= EDGE:
+		elif above >= bounds.position.y + EDGE:
 			pos = Vector2(x, above)
 		else:
-			pos = Vector2(x, clampf((bounds.y - sz.y) * 0.5, EDGE, maxf(EDGE, bounds.y - sz.y - EDGE)))
+			pos = Vector2(x, clampf(bounds.position.y + (bounds.size.y - sz.y) * 0.5,
+					bounds.position.y + EDGE, maxf(bounds.position.y + EDGE, bounds.end.y - sz.y - EDGE)))
 	_bubble.position = pos
 
 
 func _draw() -> void:
 	if not _active:
 		return
-	var bounds := Rect2(Vector2.ZERO, size)
+	var bounds := _bounds()
 	var hole := _local_hole()
 	var rects: Array = side_rects(bounds, hole)
 	for r_v in rects:
