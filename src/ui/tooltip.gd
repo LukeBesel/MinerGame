@@ -22,6 +22,16 @@ var _candidate: Control = null
 var _mode := MODE_HOVER
 var _timer := 0.0
 var _active: Control = null
+var _suppressed := false		# onboarding dim up: tooltips must not draw above it
+
+
+## Suppress all tooltips (used while the onboarding overlay dims the screen — this layer
+## sits above the dim, so showing anything would punch through it).
+func set_suppressed(on: bool) -> void:
+	_suppressed = on
+	if on:
+		_candidate = null
+		_hide_tip()
 
 
 func _ready() -> void:
@@ -139,7 +149,7 @@ func _on_control_input(event: InputEvent, c: Control) -> void:
 
 
 func _begin(c: Control, mode: int, delay: float) -> void:
-	if not _providers.has(c):
+	if _suppressed or not _providers.has(c):
 		return
 	_candidate = c
 	_mode = mode

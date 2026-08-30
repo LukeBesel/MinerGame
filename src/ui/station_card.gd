@@ -1,12 +1,16 @@
 ## StationCard — one production-line card: status icon + name, tiny stat row
 ## (throughput / quality / WIP), and the 4 upgrade buttons (or one big Unlock button).
 ## Upgrades that help the CURRENT bottleneck and are affordable get the amber glow
-## (pillar #1: the helping purchase is always highlighted).
+## (pillar #1: the helping purchase is always highlighted). In simple ui_mode the card is
+## compact (no upgrade grid) and the current bottleneck's card is promoted with one big
+## FIX IT button driven by Game.get_best_fix_view()/apply_best_fix().
 extends PanelContainer
 
 const UiTheme = preload("res://src/ui/ui_theme.gd")
 const UiUtil = preload("res://src/ui/ui_util.gd")
 const TooltipScript = preload("res://src/ui/tooltip.gd")
+
+const FIX_BTN_MIN_H := 56.0
 
 var index := -1
 
@@ -18,15 +22,21 @@ var _locked_box: VBoxContainer
 var _unlock_btn: Button
 var _open_box: VBoxContainer
 var _thr_value: Label
+var _q_box: Control
 var _q_value: Label
 var _wip_bar: ProgressBar
 var _wip_dash: Label
+var _grid: GridContainer
+var _fix_btn: Button
 var _upgrade_btns: Dictionary = {}		# uid -> Button
 var _hot: Dictionary = {}				# uid -> bool
 var _pulse_tweens: Dictionary = {}		# uid -> Tween
 
 var _view: Dictionary = {}
+var _fix: Dictionary = {}				# best-fix view while this card is the bottleneck
+var _mode := "simple"					# resolved ui_mode ("simple"|"advanced")
 var _selected := false
+var _promoted := false					# simple-mode bottleneck promotion
 
 
 func setup(station_index: int, tooltip) -> void:
@@ -93,8 +103,9 @@ func setup(station_index: int, tooltip) -> void:
 	_thr_value = thr_block["value"]
 	stat_row.add_child(thr_block["box"])
 	var q_block := _stat_block("ui.quality")
+	_q_box = q_block["box"]
 	_q_value = q_block["value"]
-	stat_row.add_child(q_block["box"])
+	stat_row.add_child(_q_box)
 	var wip_box := VBoxContainer.new()
 	wip_box.add_theme_constant_override("separation", 2)
 	wip_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -117,12 +128,12 @@ func setup(station_index: int, tooltip) -> void:
 	stat_row.add_child(wip_box)
 	if _tooltip != null:
 		_tooltip.attach(thr_block["box"], _tip_stat.bind("ui.throughput", "ui.tip_throughput"))
-		_tooltip.attach(q_block["box"], _tip_stat.bind("ui.quality", "ui.tip_quality"))
+		_tooltip.attach(_q_box, _tip_stat.bind("ui.quality", "ui.tip_quality"))
 		_tooltip.attach(wip_box, _tip_wip)
 
-	var grid := GridContainer.new()
-	grid.columns = 2
-	_open_box.add_child(grid)
+	_grid = GridContainer.new()
+	_grid.columns = 2
+	_open_box.add_child(_grid)
 	for uid in UiUtil.UPGRADE_IDS:
 		var b := Button.new()
 		b.theme_type_variation = "UpgradeButton"
@@ -132,11 +143,23 @@ func setup(station_index: int, tooltip) -> void:
 		b.custom_minimum_size = Vector2(0, 44)
 		b.text = UiUtil.upgrade_display_name(index, str(uid))
 		b.pressed.connect(_on_upgrade_pressed.bind(str(uid)))
-		grid.add_child(b)
+		_grid.add_child(b)
 		_upgrade_btns[uid] = b
 		_hot[uid] = false
 		if _tooltip != null:
 			_tooltip.attach(b, _tip_upgrade.bind(str(uid)))
+
+	# Simple mode: the one big FIX IT call-to-action (bottleneck card only).
+	_fix_btn = Button.new()
+	_fix_btn.theme_type_variation = "FixButton"
+	_fix_btn.custom_minimum_size = Vector2(0, FIX_BTN_MIN_H)
+	_fix_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_fix_btn.visible = false
+	_fix_btn.pressed.connect(_on_fix_pressed)
+	_open_box.add_child(_fix_btn)
+	if _tooltip != null:
+		_tooltip.attach(_fix_btn, _tip_fix)
+	_apply_mode()
 
 
 func _stat_block(caption_key: String) -> Dictionary:
@@ -154,11 +177,37 @@ func _stat_block(caption_key: String) -> Dictionary:
 	return {"box": box, "value": value}
 
 
+# ---------------------------------------------------------------- ui mode
+
+## mode: resolved ui_mode string ("simple"|"advanced"). Safe to call before _ready.
+func set_ui_mode(mode: String) -> void:
+	if _mode == mode:
+		return
+	_mode = mode
+	_apply_mode()
+
+
+func _apply_mode() -> void:
+	if _grid == null:
+		return	# not built yet; _ready calls _apply_mode() at the end
+	var advanced := _mode == "advanced"
+	_grid.visible = advanced
+	_q_box.visible = advanced
+	if not advanced:
+		# Simple face never pulses hidden buttons.
+		for uid in UiUtil.UPGRADE_IDS:
+			_apply_hot(str(uid), _upgrade_btns[uid], false)
+	_update_fix_btn()
+	_apply_panel_style()
+
+
 # ---------------------------------------------------------------- updates (10 Hz)
 
-## view: station view dict; upviews: uid -> upgrade view dict; money: BigNum (may be null).
-func update_view(view: Dictionary, upviews: Dictionary, money: Variant) -> void:
+## view: station view dict; upviews: uid -> upgrade view dict; money: BigNum (may be null);
+## fix: Game.get_best_fix_view() dict — only passed for the current bottleneck's card.
+func update_view(view: Dictionary, upviews: Dictionary, money: Variant, fix: Dictionary = {}) -> void:
 	_view = view
+	_fix = fix
 	var unlocked := bool(view.get("unlocked", false))
 	var is_bn := bool(view.get("is_bottleneck", false))
 	var status := int(view.get("status", -1))
@@ -171,7 +220,9 @@ func update_view(view: Dictionary, upviews: Dictionary, money: Variant) -> void:
 
 	_locked_box.visible = not unlocked
 	_open_box.visible = unlocked
+	_apply_panel_style()
 	if not unlocked:
+		_update_fix_btn()	# clears a stale promotion (also re-styles the panel)
 		_update_locked(view, money)
 		return
 
@@ -190,8 +241,35 @@ func update_view(view: Dictionary, upviews: Dictionary, money: Variant) -> void:
 		_wip_bar.visible = false
 		_wip_dash.visible = true
 
-	for uid in UiUtil.UPGRADE_IDS:
-		_update_upgrade_btn(str(uid), upviews.get(uid, {}), view)
+	_update_fix_btn()
+	if _mode == "advanced":
+		for uid in UiUtil.UPGRADE_IDS:
+			_update_upgrade_btn(str(uid), upviews.get(uid, {}), view)
+
+
+## The simple-mode FIX IT button: visible only on the unlocked current bottleneck, label
+## ui.fix_it / ui.fix_unlock (ui.fix_saving when unaffordable) formatted with the cost,
+## plus the view's own localized one-line description as a second line.
+func _update_fix_btn() -> void:
+	if _fix_btn == null:
+		return
+	var promoted: bool = _mode != "advanced" and bool(_view.get("is_bottleneck", false)) \
+			and bool(_view.get("unlocked", false))
+	if _promoted != promoted:
+		_promoted = promoted
+		_apply_panel_style()
+	if not promoted or _fix.is_empty():
+		_fix_btn.visible = false
+		return
+	_fix_btn.visible = true
+	var affordable := bool(_fix.get("affordable", false))
+	var key := UiUtil.fix_label_key(str(_fix.get("kind", "")), affordable)
+	var text := UiUtil.trf(key, [UiUtil.money(_fix.get("cost"))])
+	var detail := str(_fix.get("label", ""))
+	if detail != "":
+		text += "\n" + detail
+	UiUtil.set_btn(_fix_btn, text)
+	_fix_btn.disabled = not affordable
 
 
 func _update_locked(view: Dictionary, money: Variant) -> void:
@@ -255,7 +333,25 @@ func set_selected(sel: bool) -> void:
 	if _selected == sel:
 		return
 	_selected = sel
-	theme_type_variation = "CardPanelSelected" if sel else "CardPanel"
+	_apply_panel_style()
+
+
+## Selected (explicit player focus) wins over the simple-mode bottleneck promotion.
+func _apply_panel_style() -> void:
+	var variation := "CardPanel"
+	if _selected:
+		variation = "CardPanelSelected"
+	elif _promoted:
+		variation = "CardPanelBottleneck"
+	if String(theme_type_variation) != variation:
+		theme_type_variation = variation
+
+
+## Global rect of the visible FIX IT button (Rect2() when hidden) — onboarding target.
+func fix_button_rect() -> Rect2:
+	if _fix_btn != null and _fix_btn.visible and _fix_btn.is_visible_in_tree():
+		return _fix_btn.get_global_rect()
+	return Rect2()
 
 
 # ---------------------------------------------------------------- input / commands
@@ -284,6 +380,18 @@ func _on_upgrade_pressed(uid: String) -> void:
 	if not UiUtil.game_ready():
 		return
 	if not UiUtil.game_cmd("buy_upgrade", [index, uid]) and AudioDirector.has_method("play"):
+		AudioDirector.play("error")
+
+
+func _on_fix_pressed() -> void:
+	if not UiUtil.game_ready():
+		return
+	if UiUtil.game_cmd("apply_best_fix"):
+		if Juice.has_method("squash"):
+			Juice.squash(_fix_btn)
+		if AudioDirector.has_method("play"):
+			AudioDirector.play("click")
+	elif AudioDirector.has_method("play"):
 		AudioDirector.play("error")
 
 
@@ -331,6 +439,17 @@ func _tip_wip() -> Array:
 	if cap > 0.0:
 		rows.append(TooltipScript.row(str(int(float(_view.get("buffer_in", 0.0)))) + " / " + str(int(cap)), UiTheme.COL_TEXT, UiTheme.FONT_SMALL))
 	rows.append(TooltipScript.dim_row(L.t("ui.tip_wip")))
+	return rows
+
+
+func _tip_fix() -> Array:
+	var rows: Array = [TooltipScript.title_row(L.t("ui.bottleneck") + " · " + str(_view.get("name", "")))]
+	var detail := str(_fix.get("label", ""))
+	if detail != "":
+		rows.append(TooltipScript.dim_row(detail))
+	rows.append(TooltipScript.dim_row(L.t("ui.tip_bottleneck")))
+	if _fix.has("cost"):
+		rows.append(TooltipScript.accent_row(UiUtil.money(_fix.get("cost"))))
 	return rows
 
 

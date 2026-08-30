@@ -12,8 +12,16 @@ const STALE_HIDE_S := 4.0		# hide once the condition has been false this long
 const MAX_TEXT_W := 520.0
 const DEFAULT_COOLDOWN_S := 30.0
 
+const HIDDEN_TARGET_SIZE := Vector2(360.0, 52.0)	# synthetic onboarding rect while hidden
+
 var _panel: PanelContainer
 var _text: Label
+var _targets = null
+var _suppressed := false		# onboarding overlay up: don't evaluate/show hints
+
+
+func setup(targets = null) -> void:
+	_targets = targets
 
 var _starved_s: Dictionary = {}		# station index -> seconds continuously starved
 var _bn_index := -1
@@ -111,8 +119,30 @@ func _ready() -> void:
 	close.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	h.add_child(close)
 
+	if _targets != null and _targets.has_method("register"):
+		_targets.register("coach", _target_rect)
+
 	EventBus.sim_stats.connect(_on_sim_stats)
 	EventBus.game_reset.connect(_on_game_reset)
+
+
+## Onboarding target: the visible Andon panel, or (it is suppressed while the overlay is
+## up) a synthetic rect centered on the board's anchor point so the step still points here.
+func _target_rect() -> Rect2:
+	if _panel != null and _panel.visible and _panel.is_visible_in_tree():
+		return _panel.get_global_rect()
+	if is_inside_tree():
+		return Rect2(global_position - Vector2(HIDDEN_TARGET_SIZE.x * 0.5, 0.0), HIDDEN_TARGET_SIZE)
+	return Rect2()
+
+
+## While suppressed (onboarding overlay) the coach neither evaluates nor shows hints.
+func set_suppressed(on: bool) -> void:
+	if _suppressed == on:
+		return
+	_suppressed = on
+	if on:
+		_hide_now()
 
 
 func _on_game_reset() -> void:
@@ -128,6 +158,8 @@ func _on_sim_stats(stats: Dictionary) -> void:
 	var now_ms := Time.get_ticks_msec()
 	var dt := clampf(float(now_ms - _last_tick_ms) / 1000.0, 0.0, 1.0)
 	_last_tick_ms = now_ms
+	if _suppressed:
+		return	# timestamp still advanced so timers don't jump on release
 	_update_timers(stats, dt)
 	_update_throttled(stats, dt)
 	_drive_board(stats)

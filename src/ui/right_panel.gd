@@ -21,9 +21,11 @@ var _active := TAB_SKILLS
 var _alert_left := 0.0
 var _skills_alert := false
 var _kaizen_alert := false
+var _targets = null
 
 
-func setup(tooltip, overlay: Control) -> void:
+func setup(tooltip, overlay: Control, targets = null) -> void:
+	_targets = targets
 	var skills = SkillTreePanel.new()
 	skills.setup(tooltip)
 	var kaizen = KaizenPanel.new()
@@ -54,6 +56,7 @@ func _ready() -> void:
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.clip_text = true
 		UiUtil.min_touch(b)
+		b.custom_minimum_size.y = 44.0	# onboarding points first-run players here
 		b.pressed.connect(_on_tab_pressed.bind(i))
 		tab_row.add_child(b)
 		_tab_btns.append(b)
@@ -65,8 +68,19 @@ func _ready() -> void:
 	for p in _panels:
 		content.add_child(p)
 
+	if _targets != null and _targets.has_method("register"):
+		_targets.register("skills_tab", _target_skills_tab)
+
 	EventBus.sim_stats.connect(_on_sim_stats)
 	_apply_active()
+
+
+func _target_skills_tab() -> Rect2:
+	if _tab_btns.size() > TAB_SKILLS:
+		var b: Button = _tab_btns[TAB_SKILLS]
+		if is_instance_valid(b) and b.is_visible_in_tree():
+			return b.get_global_rect()
+	return Rect2()
 
 
 func _on_tab_pressed(i: int) -> void:

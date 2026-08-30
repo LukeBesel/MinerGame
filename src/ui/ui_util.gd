@@ -116,6 +116,59 @@ static func setting(key: String, def: Variant) -> Variant:
 	return def
 
 
+## Guarded settings write: set_setting → set_value → direct property, but only when the
+## service actually has the field. Returns true when the service accepted the write (it
+## emits settings_changed itself); false = the field hasn't shipped yet, so the caller
+## should keep the value session-local and announce the change on the bus itself.
+static func write_setting(key: String, value: Variant) -> bool:
+	var ss := autoload("SettingsService")
+	if ss == null or not (key in ss):
+		return false
+	if ss.has_method("set_setting"):
+		ss.call("set_setting", key, value)
+	elif ss.has_method("set_value"):
+		ss.call("set_value", key, value)
+	else:
+		ss.set(key, value)
+	if ss.get(key) != value:
+		# set_setting predates this key (mid-land window) — force the property, whose
+		# setter emits settings_changed / schedules the save on the shipped service.
+		ss.set(key, value)
+	return true
+
+
+# ---------------------------------------------------------------- ui mode (simple/advanced)
+
+## Normalize any stored/announced ui_mode value: only the exact string "advanced" counts;
+## everything else (missing field, null, junk) is the default "simple" face of the game.
+static func resolve_ui_mode(v: Variant) -> String:
+	if typeof(v) == TYPE_STRING and str(v) == "advanced":
+		return "advanced"
+	return "simple"
+
+
+static func ui_mode() -> String:
+	return resolve_ui_mode(setting("ui_mode", "simple"))
+
+
+## Locale key for the big FIX IT button (pure). kind: "upgrade"|"unlock" from the
+## best-fix view; unaffordable always reads as "Save up — {cost}".
+static func fix_label_key(kind: String, affordable: bool) -> String:
+	if not affordable:
+		return "ui.fix_saving"
+	if kind == "unlock":
+		return "ui.fix_unlock"
+	return "ui.fix_it"
+
+
+static func best_fix_view() -> Dictionary:
+	return game_dict("get_best_fix_view")
+
+
+static func order_view() -> Dictionary:
+	return game_dict("get_order_view")
+
+
 # ---------------------------------------------------------------- localization wrappers
 
 static func tr_key(key: String) -> String:

@@ -7,9 +7,13 @@ const UiTheme = preload("res://src/ui/ui_theme.gd")
 const UiUtil = preload("res://src/ui/ui_util.gd")
 const TooltipScript = preload("res://src/ui/tooltip.gd")
 
+const MONEY_SIZE_SIMPLE := 26	# simple mode bumps the key numeral (≥ 26 px)
+
 var _tooltip = null
+var _targets = null
 
 var _money_value: Label
+var _money_box: Control
 var _pps_value: Label
 var _oee_value: Label
 var _bn_chip: PanelContainer
@@ -23,8 +27,9 @@ var _countup_hold := 0.0		# seconds left where Juice.count_up owns the label
 var _last_tick_ms := 0
 
 
-func setup(tooltip) -> void:
+func setup(tooltip, targets = null) -> void:
 	_tooltip = tooltip
+	_targets = targets
 
 
 func _ready() -> void:
@@ -37,9 +42,10 @@ func _ready() -> void:
 	add_child(row)
 
 	var money_block := _make_block("ui.money", "ui.tip_money")
+	_money_box = money_block["box"]
 	_money_value = money_block["value"]
 	_money_value.theme_type_variation = "MoneyLabel"
-	row.add_child(money_block["box"])
+	row.add_child(_money_box)
 
 	var pps_block := _make_block("ui.parts_per_sec", "ui.tip_pps")
 	_pps_value = pps_block["value"]
@@ -61,11 +67,31 @@ func _ready() -> void:
 	_kp_value = kp_block["value"]
 	row.add_child(kp_block["box"])
 
+	if _targets != null and _targets.has_method("register"):
+		_targets.register("top_bar_money", _target_money)
+
 	EventBus.sim_stats.connect(_on_sim_stats)
 	EventBus.game_reset.connect(_on_game_reset)
 	EventBus.load_completed.connect(_refresh_once)
 	EventBus.settings_changed.connect(_on_settings_changed)
+	_apply_money_size(UiUtil.ui_mode())
 	_refresh_once()
+
+
+func _target_money() -> Rect2:
+	if _money_box != null and _money_box.is_visible_in_tree():
+		return _money_box.get_global_rect()
+	return Rect2()
+
+
+## Simple mode bumps the headline money numeral to ≥ 26 px (mode is the resolved string).
+func _apply_money_size(mode: String) -> void:
+	if _money_value == null:
+		return
+	if mode == "advanced":
+		_money_value.remove_theme_font_size_override("font_size")
+	else:
+		_money_value.add_theme_font_size_override("font_size", MONEY_SIZE_SIMPLE)
 
 
 ## Caption-over-value stat block.
@@ -166,10 +192,13 @@ func _on_game_reset() -> void:
 	_refresh_once()
 
 
-func _on_settings_changed(key: String, _value: Variant) -> void:
+func _on_settings_changed(key: String, value: Variant) -> void:
 	if key == "number_format":
 		_last_money = null
 		_refresh_once()
+	elif key == "ui_mode":
+		# Use the announced value (the field may still be session-local in stub era).
+		_apply_money_size(UiUtil.resolve_ui_mode(value))
 
 
 func _on_sim_stats(stats: Dictionary) -> void:

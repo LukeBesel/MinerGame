@@ -189,6 +189,103 @@ contract that is fine during the build).
 - Motion (coach slide, hot-button pulse, toast pop, offline count-up) all check
   `SettingsService.reduce_motion` at trigger time.
 
+## Simple mode + onboarding + orders (2026-08-30)
+
+New in this pass: the simple-mode default face, the first-run onboarding overlay, and the
+rush-order widget. New files: `onboard_targets.gd` (pure registry), `onboarding.gd`,
+`order_widget.gd`; touched: `hud.gd`, `station_panel.gd`, `station_card.gd`, `top_bar.gd`,
+`right_panel.gd`, `coach.gd`, `tooltip.gd`, `ui_util.gd`, `ui_theme.gd`, `tests/test_ui.gd`.
+
+### Simple mode (default)
+
+- `SettingsService.ui_mode` resolves through `UiUtil.resolve_ui_mode(v)`: only the exact
+  string `"advanced"` counts, anything else (missing field included) is `"simple"`.
+- Simple cards: glyph + name + throughput + WIP bar; quality block and the 4-button grid
+  hidden; buy-multiplier row hidden too (bulk-buy is an advanced concern; FIX IT always
+  buys exactly one step sim-side). Locked cards keep their big Unlock button.
+- The current bottleneck's card is promoted (`CardPanelBottleneck` variation: 2 px amber
+  edge, taller v-margins) and carries the FIX IT button (`FixButton` variation, ≥ 56 px,
+  full width): label `ui.fix_it`/`ui.fix_unlock` (`ui.fix_saving` + disabled when not
+  affordable) formatted with the cost, plus the view's localized `label` as line 2.
+  StationPanel fetches `Game.get_best_fix_view()` once per sim_stats tick (simple mode
+  only) and passes it to the bottleneck card; `{}` hides the button (nothing helps /
+  everything maxed / API absent). Click → `Game.apply_best_fix()` + `Juice.squash` +
+  AudioDirector `click` (`error` on a refused fix).
+- Mode toggle (`GhostButton`, ≥ 44 px, top of the station panel) names the mode you switch
+  TO (`ui.advanced_toggle`/`ui.simple_toggle`). Write path: `UiUtil.write_setting(key, v)`
+  → set_setting/set_value/property **only when the field exists on the service**; when it
+  returns false the panel self-emits `settings_changed("ui_mode", v)` so the flip still
+  works session-locally (settings_panel stub-era precedent). All listeners react to
+  `settings_changed("ui_mode", value)` **using the announced value**, not a re-read —
+  that keeps the stub-era path coherent. TopBar bumps the money numeral to 26 px in
+  simple mode (override removed in advanced). Selection (amber `CardPanelSelected`) wins
+  over promotion styling.
+
+### Onboarding overlay + target registry
+
+- `onboard_targets.gd`: tiny named-rect registry (`register(name, Callable) / rect(name)
+  -> Rect2` — zero rect = missing). One instance built by hud.gd and handed to panels via
+  `setup(...)`. Registered: `top_bar_money` (top_bar), `coach` (coach — synthetic rect at
+  its anchor while the panel is hidden/suppressed), `bottleneck_card` + `fix_button`
+  (station_panel, re-resolved per call so the moving bottleneck stays tracked),
+  `skills_tab` (right_panel, tab 0), `world_bottleneck` (hud itself: a box centered in
+  the 3D gap between the panels). Providers must tolerate any-frame calls and return
+  `Rect2()` when hidden.
+- `onboarding.gd` starts on `load_completed` when `SettingsService.onboarding_done` is
+  falsy AND `Data.db.onboarding` has steps (accepts the loader's normalized Array shape
+  and the raw `{steps:[...]}` doc shape). Dim = root `_draw` of the four side rects
+  around the hole (`side_rects` static, tested) + corner-notch polygons + amber
+  `draw_style_box` ring — no shaders. Input: four blocker Controls (STOP) cover exactly
+  the dim rects, so **the hole lets clicks through** (required: the FIX IT step advances
+  by really buying). Steps with `advance == "on_upgrade"` hide Next and auto-advance on
+  `EventBus.station_upgraded` (exactly as pinned — an unlock does not advance them; Skip
+  covers that corner). Never soft-locks: Skip always visible (≥ 44 px), Esc (`ui_cancel`)
+  skips, missing target ⇒ no hole (full dim) + centered bubble. Skip/finish writes
+  `onboarding_done = true` via the guarded write; `_ran` also blocks re-trigger within
+  the session. Spotlight repositioning is exp-smoothed, snapped under reduce-motion.
+- While the overlay is up hud.gd relays its `active_changed(bool)` to
+  `coach.set_suppressed()` (no hint evaluation/board) and `tooltip.set_suppressed()`
+  (the tooltip layer sits above the dim, so it must stay dark). Both release on finish.
+
+### Rush-order widget
+
+- `order_widget.gd`, placed by hud.gd under the coach (top-center, `content_top + 64`).
+  Hidden by default; state machine HIDDEN→ACTIVE→LEAVING survives `game_reset` (hides).
+- Shows on `order_started` (slide-in; instant under reduce-motion). Renders from the
+  `"order"` dict in each sim_stats snapshot, polling `Game.get_order_view()` as fallback
+  when the snapshot lacks it; a snapshot with a non-empty order while HIDDEN re-shows
+  instantly (loading into a running order). Fields: `ui.order_title` + localized name
+  (`name`, falling back to `L.t(name_key)`), progress bar + `ui.order_progress`,
+  `ui.order_time_left` (ceil, red under 10 s), `ui.order_reward`.
+- `order_completed` → one toast `ui.order_done` with the BigNum reward (format-mode
+  aware) + green flash (`OrderPanelGood`) + slide out; `order_failed` → `ui.order_missed`
+  toast + slide out. Duplicate/stale signals ignored (state + id guard); under
+  reduce-motion the flash is held as a color state, hide is instant.
+
+### Guarded assumptions → observed landing
+
+Everything above was written against guards and degraded gracefully; **during this session
+the sim/save/data agents landed the real APIs** and all paths were runtime-verified against
+them: `SettingsService.ui_mode`/`onboarding_done` (set_setting round-trip + disk persistence
+observed across probe runs), `Game.get_best_fix_view()/apply_best_fix()` (a real FIX IT
+click bought "Faster Machine" for $3 and charged the money), `Game.get_order_view()` and
+the localized snapshot `"order"`, `Data.db.onboarding` (loader ships a plain Array of
+normalized steps — the UI accepts both that and `{steps:[...]}`). Locale keys `ui.fix_*`,
+`ui.order_*`, `ui.next/skip/done`, `ui.*_toggle`, `onboarding.step1..6` are all merged.
+A 63-check headless probe (HUD against live autoloads) passed 63/63: onboarding first-run
+flow incl. on_upgrade auto-advance and once-per-session, suppression/release, simple/advanced
+round-trip, FIX IT label states, order lifecycle incl. duplicate-signal guards.
+
+### Validation (this pass)
+
+- All 18 `src/ui/*.gd` files pass the §2 filtered check-only with empty output.
+- Full suite: **155 passed / 0 failed, 1717 asserts** (tests/test_ui.gd now 15 tests —
+  new hermetic coverage: ui-mode resolution, fix-label keys, order ratio/countdown/progress
+  formatting, onboarding step normalization + flow logic + side-rect tiling, target
+  registry, new theme variations).
+- `BNK_SMOKE=1` boot (fresh profile, onboarding overlay live): `BNK_SMOKE_OK`, zero
+  script errors.
+
 ## Validation status (at hand-off)
 
 - All 15 `src/ui/*.gd` files pass the §2 check-only command with **empty** output.

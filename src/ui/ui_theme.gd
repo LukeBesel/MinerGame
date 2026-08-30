@@ -90,6 +90,8 @@ static func build() -> Theme:
 	_panel_variation(t, "TopBarPanel", flat(COL_PANEL_2, COL_BORDER, 1, 8, 14.0, 4.0))
 	_panel_variation(t, "CardPanel", flat(COL_CARD, COL_BORDER, 1, 8, 9.0, 8.0))
 	_panel_variation(t, "CardPanelSelected", flat(COL_CARD, COL_AMBER, 1, 8, 9.0, 8.0))
+	# Simple mode: the current bottleneck's card is promoted (amber edge, a bit taller).
+	_panel_variation(t, "CardPanelBottleneck", flat(Color("#26241E"), COL_AMBER, 2, 8, 9.0, 12.0))
 	_panel_variation(t, "ChipPanel", flat(COL_CARD, COL_BORDER, 1, 8, 9.0, 4.0))
 	_panel_variation(t, "InsetPanel", flat(COL_INPUT, COL_BORDER, 1, RADIUS, 10.0, 8.0))
 	_panel_variation(t, "CoachPanel", with_shadow(flat(COL_AMBER_BG, Color(COL_AMBER, 0.85), 1, 8, 12.0, 8.0)))
@@ -97,6 +99,9 @@ static func build() -> Theme:
 	_panel_variation(t, "ToastPanel", with_shadow(flat(COL_CARD, COL_BORDER_LIGHT, 1, 8, 12.0, 8.0)))
 	_panel_variation(t, "ToastPanelGood", with_shadow(flat(COL_AMBER_BG, COL_AMBER, 1, 8, 12.0, 8.0)))
 	_panel_variation(t, "ModalPanel", with_shadow(flat(COL_PANEL, COL_BORDER_LIGHT, 1, 10, 16.0, 14.0), 16))
+	# Rush-order widget bar (+ green flash state on completion).
+	_panel_variation(t, "OrderPanel", with_shadow(flat(COL_CARD, COL_BORDER_LIGHT, 1, 8, 12.0, 8.0)))
+	_panel_variation(t, "OrderPanelGood", with_shadow(flat(COL_GREEN_BG, COL_GREEN, 1, 8, 12.0, 8.0)))
 
 	# ---- Labels ----
 	t.set_color("font_color", "Label", COL_TEXT)
@@ -139,6 +144,19 @@ static func build() -> Theme:
 	t.set_color("font_focus_color", "AccentButton", Color("#17191D"))
 	t.set_color("font_disabled_color", "AccentButton", Color("#8A8578"))
 	t.set_font("font", "AccentButton", bold)
+
+	# Simple mode's big FIX IT call-to-action (amber, two-line capable).
+	t.set_type_variation("FixButton", "AccentButton")
+	t.set_font_size("font_size", "FixButton", 17)
+
+	# Low-key text button (mode toggle): transparent until hovered.
+	t.set_type_variation("GhostButton", "Button")
+	t.set_font_size("font_size", "GhostButton", FONT_SMALL)
+	t.set_stylebox("normal", "GhostButton", flat(Color(0, 0, 0, 0), COL_BORDER, 1, RADIUS, 10.0, 4.0))
+	t.set_stylebox("hover", "GhostButton", flat(COL_BTN_HOVER, COL_BORDER_LIGHT, 1, RADIUS, 10.0, 4.0))
+	t.set_stylebox("pressed", "GhostButton", flat(COL_BTN_PRESS, COL_BORDER_LIGHT, 1, RADIUS, 10.0, 4.0))
+	t.set_color("font_color", "GhostButton", COL_TEXT_DIM)
+	t.set_color("font_hover_color", "GhostButton", COL_TEXT)
 
 	# Tab strip buttons (toggle_mode; "pressed" = active tab, amber underline).
 	var tab_off := flat(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 0, RADIUS, 12.0, 8.0)

@@ -1,6 +1,8 @@
-## StationPanel — the left production-line list: buy-multiplier toggle (x1/x10/x100/MAX)
-## on top, then one StationCard per station (index-aligned with sim_stats.stations) in a
-## ScrollContainer. Reacts to EventBus.station_selected (3D clicks) with highlight+scroll.
+## StationPanel — the left production-line list: ui-mode toggle (simple/advanced) and the
+## buy-multiplier toggle (x1/x10/x100/MAX, advanced only) on top, then one StationCard per
+## station (index-aligned with sim_stats.stations) in a ScrollContainer. Reacts to
+## EventBus.station_selected (3D clicks) with highlight+scroll; owns the simple-mode
+## best-fix plumbing and the bottleneck_card / fix_button onboarding targets.
 extends PanelContainer
 
 const UiUtil = preload("res://src/ui/ui_util.gd")
@@ -9,18 +11,25 @@ const StationCard = preload("res://src/ui/station_card.gd")
 const TooltipScript = preload("res://src/ui/tooltip.gd")
 
 const MULT_OPTIONS := [1, 10, 100, SimTypes.BUY_MAX]
+const TOGGLE_MIN_H := 44.0		# simple-mode target floor
 
 var _tooltip = null
+var _targets = null
 var _scroll: ScrollContainer
 var _cards_box: VBoxContainer
 var _cards: Array = []
 var _mult_btns: Array = []
+var _mult_row: HBoxContainer
+var _mode_btn: Button
 var _selected := -1
 var _mult := 1
+var _ui_mode := "simple"
+var _bn_index := -1
 
 
-func setup(tooltip) -> void:
+func setup(tooltip, targets = null) -> void:
 	_tooltip = tooltip
+	_targets = targets
 
 
 func _ready() -> void:
@@ -31,15 +40,29 @@ func _ready() -> void:
 	v.add_theme_constant_override("separation", 8)
 	add_child(v)
 
-	# Buy-multiplier segmented toggle.
-	var mult_row := HBoxContainer.new()
-	mult_row.add_theme_constant_override("separation", 4)
-	v.add_child(mult_row)
+	# Mode toggle: the button names the mode you switch TO.
+	var mode_row := HBoxContainer.new()
+	v.add_child(mode_row)
+	var mode_spacer := Control.new()
+	mode_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	mode_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mode_row.add_child(mode_spacer)
+	_mode_btn = Button.new()
+	_mode_btn.theme_type_variation = "GhostButton"
+	UiUtil.min_touch(_mode_btn, 96.0)
+	_mode_btn.custom_minimum_size.y = TOGGLE_MIN_H
+	_mode_btn.pressed.connect(_on_mode_toggle)
+	mode_row.add_child(_mode_btn)
+
+	# Buy-multiplier segmented toggle (advanced mode only).
+	_mult_row = HBoxContainer.new()
+	_mult_row.add_theme_constant_override("separation", 4)
+	v.add_child(_mult_row)
 	var buy_label := Label.new()
 	buy_label.theme_type_variation = "DimLabel"
 	buy_label.text = L.t("ui.buy")
 	buy_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	mult_row.add_child(buy_label)
+	_mult_row.add_child(buy_label)
 	for m in MULT_OPTIONS:
 		var b := Button.new()
 		b.theme_type_variation = "MultButton"
@@ -52,10 +75,10 @@ func _ready() -> void:
 		else:
 			b.text = UiUtil.trf_or("ui.buy_mult_" + str(mi), [], "x" + str(mi))
 		b.pressed.connect(_on_mult_pressed.bind(mi))
-		mult_row.add_child(b)
+		_mult_row.add_child(b)
 		_mult_btns.append(b)
 	if _tooltip != null:
-		_tooltip.attach(mult_row, _tip_mult)
+		_tooltip.attach(_mult_row, _tip_mult)
 
 	_scroll = ScrollContainer.new()
 	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -67,13 +90,80 @@ func _ready() -> void:
 	_cards_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_scroll.add_child(_cards_box)
 
+	if _targets != null and _targets.has_method("register"):
+		_targets.register("bottleneck_card", _target_bottleneck_card)
+		_targets.register("fix_button", _target_fix_button)
+
 	EventBus.sim_stats.connect(_on_sim_stats)
 	EventBus.station_selected.connect(_on_station_selected)
 	EventBus.buy_multiplier_changed.connect(_on_mult_changed)
+	EventBus.settings_changed.connect(_on_settings_changed)
 	EventBus.game_reset.connect(_refresh_once)
 	EventBus.load_completed.connect(_refresh_once)
 	_sync_mult_from_game()
+	_apply_ui_mode(UiUtil.ui_mode())
 	_refresh_once()
+
+
+# ---------------------------------------------------------------- ui mode
+
+func _on_mode_toggle() -> void:
+	var next_mode := "advanced" if _ui_mode != "advanced" else "simple"
+	if not UiUtil.write_setting("ui_mode", next_mode):
+		# Field not shipped yet: keep the flip session-local, announce it ourselves so
+		# every listener (this panel included) re-renders through the same path.
+		EventBus.settings_changed.emit("ui_mode", next_mode)
+	if AudioDirector.has_method("play"):
+		AudioDirector.play("click")
+
+
+func _on_settings_changed(key: String, value: Variant) -> void:
+	if key == "ui_mode":
+		_apply_ui_mode(UiUtil.resolve_ui_mode(value))
+
+
+func _apply_ui_mode(mode: String) -> void:
+	_ui_mode = mode
+	var advanced := mode == "advanced"
+	if _mode_btn != null:
+		UiUtil.set_btn(_mode_btn, L.t("ui.simple_toggle" if advanced else "ui.advanced_toggle"))
+	if _mult_row != null:
+		_mult_row.visible = advanced
+	for card in _cards:
+		if is_instance_valid(card):
+			card.set_ui_mode(mode)
+	_rerender()
+
+
+## Re-render from the last snapshot without touching the selection (mode flips).
+func _rerender() -> void:
+	var stats := UiUtil.stats_snapshot()
+	if not stats.is_empty():
+		_on_sim_stats(stats)
+
+
+# ---------------------------------------------------------------- onboarding targets
+
+func _bn_card() -> Variant:
+	if _bn_index >= 0 and _bn_index < _cards.size():
+		var card: Variant = _cards[_bn_index]
+		if is_instance_valid(card):
+			return card
+	return null
+
+
+func _target_bottleneck_card() -> Rect2:
+	var card: Variant = _bn_card()
+	if card != null and card.is_visible_in_tree():
+		return card.get_global_rect()
+	return Rect2()
+
+
+func _target_fix_button() -> Rect2:
+	var card: Variant = _bn_card()
+	if card != null and card.has_method("fix_button_rect"):
+		return card.fix_button_rect()
+	return Rect2()
 
 
 func _tip_mult() -> Array:
@@ -129,17 +219,22 @@ func _on_sim_stats(stats: Dictionary) -> void:
 	var stations: Array = stations_v
 	_ensure_cards(stations.size())
 	var money: Variant = stats.get("money")
+	_bn_index = int(stats.get("bottleneck", -1))
+	var advanced := _ui_mode == "advanced"
+	var fix: Dictionary = {}
+	if not advanced and _bn_index >= 0:
+		fix = UiUtil.best_fix_view()	# once per tick; keeps the FIX IT label fresh
 	for i in stations.size():
 		var view_v: Variant = stations[i]
 		if typeof(view_v) != TYPE_DICTIONARY:
 			continue
 		var view: Dictionary = view_v
 		var upviews := {}
-		if bool(view.get("unlocked", false)):
+		if advanced and bool(view.get("unlocked", false)):
 			for uid in UiUtil.UPGRADE_IDS:
 				upviews[uid] = UiUtil.upgrade_view(i, str(uid))
 		var card: Variant = _cards[i]
-		card.update_view(view, upviews, money)
+		card.update_view(view, upviews, money, fix if i == _bn_index else {})
 
 
 func _ensure_cards(n: int) -> void:
@@ -152,6 +247,7 @@ func _ensure_cards(n: int) -> void:
 	for i in n:
 		var card = StationCard.new()
 		card.setup(i, _tooltip)
+		card.set_ui_mode(_ui_mode)
 		_cards_box.add_child(card)
 		_cards.append(card)
 	_apply_selection()
