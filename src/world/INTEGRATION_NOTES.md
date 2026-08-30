@@ -14,8 +14,9 @@ file is the 2-entry `factory_world.tscn` (Node3D "FactoryWorld" + script), insta
 | `conveyor_view.gd` | Belt segment: chevron shader scrolling ∝ upstream throughput, MultiMesh parts (density ∝ flow, capped). |
 | `camera_rig.gd` | Orbit camera (default) + Gemba Walk (CharacterBody3D); click/hover raycasts. |
 | `world_lib.gd` | Palette/layout constants, build-once mesh & material caches, ghost swap, settings access. |
-| `floor_grid.gdshader` | Worn concrete + seam grid + dashed amber aisle strips + radial green pulse wave. |
-| `belt_chevrons.gdshader` | Emissive moving chevrons; CPU-accumulated `scroll` uniform so speed changes never jump phase. |
+| `floor_grid.gdshader` | Worn concrete (real PBR maps, world-space UVs) + seam grid + dashed amber aisle strips + radial green pulse wave. |
+| `belt_chevrons.gdshader` | Rubber PBR belt + emissive moving chevrons; CPU-accumulated `scroll` uniform so speed changes never jump phase. |
+| `light_shaft.gdshader` | Additive skylight shaft cones (height + rim fade); works on gl_compatibility. |
 
 ## Runtime node tree (built in `_ready`)
 
@@ -127,3 +128,103 @@ GPU (Forward+): glow/bloom strength on emissives, SSAO contact shading, fog dens
   ~7 stations would outgrow the shell — bump `FLOOR_MAX_X` if the data ever grows.
 - Randomness in this layer is cosmetic only (flicker timing); all sim-driven motion is
   deterministic from `sim_stats`.
+
+## Art overhaul — 2026-08-30
+
+Full visual overhaul of the hall ("too blocky / AI made" → art-directed industrial). Zero
+gameplay-behavior changes: every signal, telegraph, camera fix (`toggle_walk` in `_input`,
+edge-pan idle/hover guards), animation hook, and reduce_motion path is untouched.
+
+### Lever 1 — real materials
+- NEW `tools/fetch_textures.py` (python3; stdlib + PIL for recompression): downloads 7
+  pinned CC0 ambientCG sets and generates 3 procedural decals. Idempotent ("up to date" on
+  re-run), `--force`, `--procedural` (offline stand-ins), retrying downloader (proxy resets),
+  per-set procedural fallback. Exact URLs + CC0 note in its header; rows appended to
+  `assets/LICENSES.md`.
+- Committed payload **2.35 MB** (budget 10 MB): Color+NormalGL 1K JPG, Roughness 512
+  grayscale. Sets → roles: Concrete034 (floor, via shader), CorrugatedSteel005 (walls),
+  PaintedMetal012 (machine paint, desaturated+normalized so per-station `STATION_PAINT`
+  tints read true; also tinted crates/drums/bins via MultiMesh instance colors),
+  MetalPlates006 (frames/plate), Metal032 (galvanized trim/rails), Rubber004 (belt, via
+  shader), DiamondPlate005A (plinth tops/mezzanine/dock; source is painted blue —
+  desaturated, relief lives in the normal map). Generated: hazard_stripes.jpg,
+  oil_stain.png, skid_marks.png.
+- `world_lib.gd` material library: `mat_pbr()` (cached, world-triplanar, roughness-tex,
+  normal-tex, optional vertex-color) + named mats (`mat_machine/paint/steel_plate[_dark]/
+  galv[_dark]/wall/wall_dado/diamond/rubber/safety/wood/hazard/mat_decal`). Missing textures
+  degrade to flat colors (headless/parallel-safe — `tex()` guards `ResourceLoader.exists`).
+  `floor_grid.gdshader` and `belt_chevrons.gdshader` now sample the concrete/rubber maps
+  (world-space UVs; belt rubber tiles at exactly 1 tile per chevron_spacing so the CPU
+  scroll wrap stays seamless); all texture uniforms have safe defaults.
+- One `--import` run was needed after fetching (documented exception; keep runs short).
+
+### Lever 2 — lighting & post
+- Tonemap **AgX** (exposure 1.4, white 8) + adjustments contrast 1.09 / saturation 1.20;
+  ambient 0.85 cool; glow hdr_threshold 1.08 intensity 0.62 (emissives only, no bloom soup);
+  SSAO kept (radius 1.6 / intensity 2.6 / power 1.7); depth fog #1C2230 @ 0.0075.
+- Key: shadowed DirectionalLight (#CFE0F5 @ 1.45) + 2 cool SpotLight pools under the line
+  skylights (shadowless) vs warm high-bay bells over every station (omni at every 2nd
+  station: 3 omnis + flicker + marker = 5 total, ≤ 8/mesh compat limit; spots are a
+  separate compat bucket).
+- Roof skylight panels (emissive glass + frames, ceiling render layer) with 4 additive
+  cone shafts (`light_shaft.gdshader`: height fade + silhouette rim fade, blend_add,
+  survives gl_compatibility) over line/back aisle only — the south pair hazed the
+  management camera and was cut. Everything verified on software-GL gl_compatibility.
+
+### Lever 3 — de-blocked machines & belts
+- All six stations rebuilt as multi-part assemblies on a plated plinth (diamond top, corner
+  bolt MultiMesh, edge-trim strips as chamfer illusion): press = C-frame + guide rods +
+  crown/hydraulics + motor + hose run + hazard chevron; lathe = bed/ways + headstock +
+  chuck jaws + tailstock + carriage + splash guard + coolant line; weld = pedestal robot
+  (thicker arms, joint cylinders, dress-pack cable) + positioner clamps + wire feeder + gas
+  bottle + smoked screen (aisle side only, robot silhouette kept); paint = booth + window
+  band + roof plenum + exhaust stack + filter grid + grating; assembly = gantry + trolley +
+  tinted small-part bin rack + mirrored arms; pack = roller bed (visible rollers MM) +
+  camera pods + label printer + monitor + stretch-wrapped pallet. Every cell gains a
+  control cabinet (station-tinted HMI screen — brightens when RUNNING via `_set_status`,
+  LEDs, vents, conduit to the cable-tray drop), back guard rails, hazard curb, and a
+  painted floor number ("01".."06", Label3D flat on slab).
+- Anim hooks preserved verbatim: `_ram` (press stroke values adjusted for the taller die),
+  `_spindle`, `_arm_a.._arm_d`, `_scan_bar`, sparks/mist particles.
+- Belts: C-channel rails, H-frame leg stands (1 MM per belt), rotating end rollers, rubber
+  PBR belt. Parts are now 3 shape variants (plate / puck / ring) as 3 MultiMeshes sharing
+  the same 26-instance-per-belt cap (182 total, unchanged).
+- BUGFIX found by renders: `WorldLib.apply_ghost` now also swaps **MultiMeshInstance3D**
+  overrides — locked belts/stations previously left their MM pieces (legs, bolts, bins)
+  solid while everything else ghosted.
+
+### Lever 4 — environmental storytelling
+All from primitives + the texture lib, aggressively MultiMeshed (every board of every
+pallet in the hall is ONE draw call; same for crates, straps, drums, rims, shelving, stock,
+posts, extinguishers, signs): pallet stacks + strapped crate piles (infeed, dock, south
+staging), colored steel drums, cantilever rack with bar stock, cable tray + hangers + drop
+conduits per station (rebuilt with the fixtures on station-count change), mezzanine along
+the back wall (diamond deck, steel columns/kick, yellow handrail, stairs), wall columns,
+glazed window bands, fire extinguisher points on columns, diegetic signage ("LINE 1",
+"SAFETY FIRST / 312 DAYS SINCE LAST INCIDENT" board, "SHIPPING →", "RECEIVING" — decorative
+English stencils, like the existing "$" tag these are environment art, not UI strings), oil
+stain + tire skid alpha decals (staggered heights, no z-fighting). Forklift/fans/flicker/
+dust kept (forklift repainted). Net new static draws ≈ 55 for the hall dressing (props are
+~15 MultiMeshes + ~20 meshes + 8 labels + 11 decal quads); per-station adds ≈ 25–30 draws
+and 3 small MultiMeshes; belts ≈ +8 each. Whole scene is still a few hundred draw calls of
+tiny meshes with fully shared cached materials — no per-frame allocation added (only the
+2 belt-roller spins and the HMI energy write on status change).
+
+### Verified from software-GL renders (5 rounds, gl_compatibility @1280×720)
+Dark-hall/lit-line value read; texture believability at close walk range; six distinct
+silhouettes incl. full unlocked line (harness cheat); ghost + price-tag stations; "!"
+bottleneck beacon, Zz/■ icons, WIP piles, scrap bins, selection/hover, chevron belts with
+mixed part shapes; signage legibility; HUD-over-world sanity; walk-mode interior. Final
+reference frames left in `/tmp/artshots/` (not committed, per repo policy).
+
+### Eyeball on a real GPU (Forward+)
+AgX + glow strength on emissive lamps/screens (software GL underestimates glow), SSAO
+contact shading under machines/props, fog density at far zoom, shaft cone alpha (raise
+`light_shaft.gdshader strength` to ~0.12 if too faint with real blending), normal-map
+strength on the floor at grazing angles, anisotropic filtering on the aisle.
+
+### Validation at hand-off
+- `--check-only`: clean on all 5 world scripts (documented autoload false-positives only).
+- Full suite: **155 passed / 0 failed** (`run_tests.gd`, includes other agents' new tests).
+- `BNK_SMOKE=1` headless boot: `BNK_SMOKE_OK`, zero script errors.
+- `python3 tools/fetch_textures.py` twice: idempotent, `du -sh assets/textures` = 2.6M.
