@@ -88,3 +88,55 @@ None from the pinned §7 schemas or vocabularies. Extra (allowed) additions only
 `BNK_TEST_FILTER=data`: **14/14 PASS (622 asserts)** · full suite at time of writing:
 **124 passed / 0 failed (1370 asserts, ~9 s)** including `test_bignum` and the sim agent's
 pacing gate on this data (`prestige_time=1765 s`, target 1500–3000 s).
+
+## Extension pass — 2026-08-30 (orders.json, onboarding.json, locale, loader)
+
+### New tables
+
+| Table | Count | Notes |
+|---|---|---|
+| orders.json | **10 templates** (8–10 allowed) | spawn knobs pinned: start_after 300 s, cooldown 90 s, min_pps 0.3, duration_fraction_of_capacity 0.7; seconds 60–240, reward_mult 1.5–3.0, kp_bonus 0/1 (3 templates pay 1 KP), weights 1–3 |
+| onboarding.json | **6 steps** (5–6 allowed) | targets ⊆ pinned {world_bottleneck, bottleneck_card, fix_button, top_bar_money, coach, skills_tab}; exactly one `on_upgrade` step and it is the fix_button step; opens and closes on world_bottleneck |
+| locale/en.json | **+30 keys → 384 total** | 14 pinned `ui.*` (fix_it/fix_saving/fix_unlock/advanced_toggle/simple_toggle/order_* /next/skip/done — exact strings test-pinned for the UI agent), `onboarding.step1..6`, 10 `order.<template_id>` customer names |
+
+### Loader contract additions
+
+- `load_all()` adds `db["orders"]` (**Dictionary**: scalar knobs + normalized `templates`
+  Array — id/name_key str, seconds/reward_mult float, kp_bonus/weight int) and
+  `db["onboarding"]` (**Array of steps** in file order — id/target/text_key/advance str).
+  Missing files degrade to `{}` / `[]`; the sim treats an empty orders config as
+  "feature off".
+- `validate()` adds: orders knobs present and sane (cooldown/min_pps > 0, fraction in
+  (0,1] so orders stay beatable), 8–10 templates, unique ids, name_keys resolve, seconds
+  in [30,600], reward_mult in (1,5], kp_bonus ∈ {0,1}, weight ≥ 1; onboarding 5–6 steps,
+  unique ids, targets ⊆ pinned `ONBOARDING_TARGETS`, advance ⊆ `ONBOARDING_ADVANCE`
+  (["next","on_upgrade"]), text_keys resolve, exactly ONE on_upgrade step. New pinned
+  consts exported for consumers: `Loader.ONBOARDING_TARGETS`, `Loader.ONBOARDING_ADVANCE`.
+
+### Order flavor & tuning rationale
+
+Ten dry-humored customers (Mega-Lo Mart, The Consultant's Rush Job, Q4 Panic at
+Corporate, The Intern Added a Zero, …). Short windows carry the fat multipliers (60 s ×2.5,
+75 s ×3.0 at weight 1) and the bread-and-butter 120–180 s orders sit at ×1.5–1.8 weight
+2–3, so the weighted average bonus ≈ +0.84× over required. With required sized at 70% of
+current steady output, an order that spawns is *earned by simply keeping the line running*
+— rushing it just ships early; misses cost nothing. Measured on the greedy bot (real data):
+first prestige 1715 s → 1700 s with orders live (8/9 orders completed) — inside the pinned
+[25, 50] min window with no balance.json retune. Note for future tuners: the "45 distinct
+events in 15 min" figure in the sections above predates the integrator's post-notes
+changes; today's baseline is 38 with and without orders (gate is ≥ 6).
+
+### Settings exception (granted)
+
+Two fields added to the save agent's `src/save/settings_service.gd` under this pass's
+explicit grant — `ui_mode` ("simple"|"advanced", default "simple") and `onboarding_done`
+(bool, default false) — following its clamp/signal/debounce pattern exactly; its own
+tests untouched and green, new coverage lives in `tests/test_assist.gd`.
+
+### Tests
+
+`tests/test_data.gd` extended (+3: orders shape/ranges, onboarding steps, pinned
+assist/order/onboarding locale strings verbatim). `BNK_TEST_FILTER=data`: 17/17 PASS.
+Full suite at time of writing: **155 passed / 0 failed (1717 asserts, ~9.3 s — includes
+the UI agent's parallel test additions)** including
+the pacing gate on this data (`prestige_time=1700 s`, target 1500–3000 s).

@@ -15,6 +15,7 @@ const MAX_QUEUED_EVENTS := 4096	# safety valve if nobody drains
 const EVENT_BATCH_SECONDS := 1.0	# rate limit for part_sold / scrap_produced batches
 const MIN_CYCLE_TIME := 0.01
 const MIN_AVAILABILITY := 0.05
+const MIN_ORDER_PARTS := 10.0	# rush orders never ask for fewer parts than this
 const EPS := 1e-9
 const REL_EPS := 1e-6
 
@@ -25,6 +26,9 @@ var skills_def: Array = []
 var milestones_def: Array = []
 var achievements_def: Array = []
 var balance: Dictionary = {}
+var orders_cfg: Dictionary = {}	# rush-order config; empty = orders disabled
+var _order_templates: Array = []	# valid template dicts, file order
+var _order_rotation_list: Array = []	# template indices expanded by weight (deterministic pick)
 
 # --- persistent economy / meta state ---
 var money = null	# BigNum
@@ -41,11 +45,14 @@ var achievements_done: Dictionary = {}	# id -> true
 var bottleneck_cleared_count: int = 0
 var upgrade_purchase_count: int = 0	# lifetime levels bought
 var zero_scrap_seconds: float = 0.0
+var order_rotation: int = 0	# persisted rush-order template rotation counter
 
 # --- run state ---
 var bottleneck: int = -1
 var pps: float = 0.0	# instantaneous sold parts/sec (last tick)
 var oee: float = 0.0
+var _order_active: Dictionary = {}	# {} when no rush order is running (see get_order_view)
+var _order_ready_at: float = 0.0	# time_played at which the next order may spawn (cooldown gate)
 
 var _st: Array = []	# per-station runtime dicts
 var _eff: Array = []	# per-station effective-stat cache
@@ -105,6 +112,19 @@ func _setup_db(game_db: Dictionary) -> void:
 	achievements_def = _as_array(game_db.get("achievements", []))
 	var bal: Variant = game_db.get("balance", {})
 	balance = bal if typeof(bal) == TYPE_DICTIONARY else {}
+	var orders_v: Variant = game_db.get("orders", {})
+	orders_cfg = orders_v if typeof(orders_v) == TYPE_DICTIONARY else {}
+	_order_templates = []
+	for t_v in _as_array(orders_cfg.get("templates", [])):
+		if typeof(t_v) == TYPE_DICTIONARY and str((t_v as Dictionary).get("id", "")) != "":
+			_order_templates.append(t_v)
+	# Weight-expanded index list: the rotation counter walks it, so template frequency
+	# follows the weights with zero RNG (deterministic outcomes, contract §6).
+	_order_rotation_list = []
+	for ti in _order_templates.size():
+		var w: int = maxi(int((_order_templates[ti] as Dictionary).get("weight", 1)), 1)
+		for _j in w:
+			_order_rotation_list.append(ti)
 	money = BigNum.zero()
 	lifetime_parts = BigNum.zero()
 	money_earned = BigNum.zero()
@@ -134,6 +154,14 @@ func _reset_run_state(fresh: bool) -> void:
 		_started_total = 0.0
 		_sold_total = 0.0
 		_wip_flushed = 0.0
+		order_rotation = 0
+		_order_active = {}
+		_order_ready_at = 0.0
+	elif not _order_active.is_empty():
+		# Prestige sells the factory mid-order: drop it silently (no failed event — the
+		# reset was the player's call, not a miss) and restart the cooldown.
+		_order_active = {}
+		_order_ready_at = time_played + _order_cooldown()
 	var mods: Dictionary = Effects.aggregate(skills_def, purchased_skills)
 	var start_money: float = _bal_f("starting_money", 0.0) + float(mods["starting_money_add"])
 	money = BigNum.from_float(start_money)
@@ -290,6 +318,7 @@ func tick(dt: float) -> void:
 	time_played += dt
 	_flow(dt)
 	_update_oee(dt)
+	_tick_orders(dt)
 	_kp_passive(dt)
 	_auto_buyer(dt)
 	_check_triggers()
@@ -537,6 +566,197 @@ func _check_triggers() -> void:
 			_queue({"t": "achievement_unlocked", "id": id})
 
 
+# ------------------------------------------------------------------ rush orders
+
+## Rush-order lifecycle, one call per tick: progress/expiry of the active order first,
+## then the spawn gate. Friendly by design — timeouts cost nothing — and deterministic:
+## the template is picked by rotating a persisted counter over the weight-expanded list.
+func _tick_orders(dt: float) -> void:
+	if _order_rotation_list.is_empty():
+		return
+	if not _order_active.is_empty():
+		_order_active["progress"] = float(_order_active["progress"]) + pps * dt
+		if float(_order_active["progress"]) >= float(_order_active["required"]) - EPS:
+			_complete_order()
+		else:
+			_order_active["seconds_left"] = float(_order_active["seconds_left"]) - dt
+			if float(_order_active["seconds_left"]) <= 0.0:
+				_fail_order()
+		return
+	# Spawn gate: opening grace period, cooldown since the last order ended, and a line
+	# that is actually flowing (min_pps) so the first order never greets an idle factory.
+	if time_played < float(orders_cfg.get("start_after_seconds", 300.0)):
+		return
+	if time_played < _order_ready_at:
+		return
+	if pps < float(orders_cfg.get("min_pps", 0.0)):
+		return
+	_spawn_order()
+
+
+## Required parts scale with the CURRENT steady rate x duration x duration_fraction (< 1),
+## so an order is always beatable at the pace the player already sustains — pushing a
+## little just ships it early.
+func _spawn_order() -> void:
+	var tpl_idx: int = int(_order_rotation_list[order_rotation % _order_rotation_list.size()])
+	order_rotation += 1
+	var tpl: Dictionary = _order_templates[tpl_idx]
+	var seconds: float = maxf(float(tpl.get("seconds", 60.0)), 1.0)
+	var fraction: float = clampf(float(orders_cfg.get("duration_fraction_of_capacity", 0.7)), 0.05, 1.0)
+	var required: float = maxf(roundf(estimate_steady_pps() * seconds * fraction), MIN_ORDER_PARTS)
+	_order_active = {
+		"id": str(tpl.get("id", "")),
+		"name_key": str(tpl.get("name_key", "")),
+		"required": required,
+		"progress": 0.0,
+		"seconds_left": seconds,
+		"reward_mult": float(tpl.get("reward_mult", 1.5)),
+		"kp_bonus": maxi(int(tpl.get("kp_bonus", 0)), 0),
+	}
+	_queue({"t": "order_started", "id": str(tpl.get("id", ""))})
+
+
+func _complete_order() -> void:
+	var id := str(_order_active["id"])
+	var reward = _order_reward_now()	# BigNum
+	if not reward.is_zero():
+		money = money.add(reward)
+		money_earned = money_earned.add(reward)
+	var kp_bonus: int = int(_order_active["kp_bonus"])
+	if kp_bonus > 0:
+		kp += float(kp_bonus)
+		_kp_last_emit = kp
+		_queue({"t": "kaizen_points_changed", "total": kp})
+	_queue({"t": "order_completed", "id": id, "reward": reward})
+	_order_active = {}
+	_order_ready_at = time_played + _order_cooldown()
+
+
+func _fail_order() -> void:
+	_queue({"t": "order_failed", "id": str(_order_active["id"])})	# no penalty, ever
+	_order_active = {}
+	_order_ready_at = time_played + _order_cooldown()
+
+
+## Bonus paid on success: required x current sale price x (reward_mult - 1). "Current"
+## price on purpose — unlocking a station mid-order raises the payout with it.
+func _order_reward_now():
+	if _order_active.is_empty():
+		return BigNum.zero()
+	var mult: float = maxf(float(_order_active["reward_mult"]) - 1.0, 0.0)
+	return _sale_price.mul_f(float(_order_active["required"]) * mult)
+
+
+func _order_cooldown() -> float:
+	return maxf(float(orders_cfg.get("cooldown_seconds", 90.0)), 0.0)
+
+
+func _order_template_by_id(id: String) -> Dictionary:
+	for tpl_v in _order_templates:
+		if str((tpl_v as Dictionary).get("id", "")) == id:
+			return tpl_v
+	return {}
+
+
+## Active rush-order view: {} when none. `name` carries the raw name_key — the Game
+## bridge localizes it (same convention as station views).
+func get_order_view() -> Dictionary:
+	if _order_active.is_empty():
+		return {}
+	return {
+		"id": str(_order_active["id"]),
+		"name": str(_order_active["name_key"]),
+		"name_key": str(_order_active["name_key"]),
+		"required": float(_order_active["required"]),
+		"progress": minf(float(_order_active["progress"]), float(_order_active["required"])),
+		"seconds_left": maxf(float(_order_active["seconds_left"]), 0.0),
+		"reward_mult": float(_order_active["reward_mult"]),
+		"reward_preview": _order_reward_now(),
+	}
+
+
+# ------------------------------------------------------------------ assist (FIX IT backend)
+
+## Best single move to relieve the current bottleneck: its four upgrade tracks (one level
+## each, respecting max_level) plus the next station unlock, scored by delta steady
+## revenue/sec per cost. Returns {} when there is no bottleneck or no move would help;
+## otherwise the best AFFORDABLE move, or — when nothing is affordable — the best move
+## overall with "affordable": false so the UI can show a save-up target.
+func best_bottleneck_fix() -> Dictionary:
+	if bottleneck < 0 or bottleneck >= _k_unlocked:
+		return {}
+	var candidates: Array = []
+	var def: Dictionary = stations_def[bottleneck]
+	var upgrades: Dictionary = _upgrades_of(def)
+	var levels: Dictionary = _st[bottleneck]["levels"]
+	var cost_mult: float = float(_mods["upgrade_cost_mult"])
+	for uid in upgrades:
+		var u: Dictionary = upgrades[uid]
+		var lvl: int = int(levels.get(uid, 0))
+		if _headroom(u, lvl) <= 0:
+			continue
+		var delta: float = estimate_upgrade_delta_rps(bottleneck, str(uid))
+		if delta <= EPS:
+			continue
+		candidates.append({
+			"kind": "upgrade",
+			"station": bottleneck,
+			"upgrade_id": str(uid),
+			"cost": UpgradeMath.level_cost(_num_f(u.get("base_cost", 0.0), 0.0),
+					float(u.get("growth", 1.0)), lvl, cost_mult),
+			"name_key": str(u.get("name_key", "")),
+			"delta": delta,
+		})
+	var next_locked: int = next_locked_index()
+	if next_locked >= 0:
+		var udelta: float = estimate_unlock_delta_rps(next_locked)
+		if udelta > EPS:
+			candidates.append({
+				"kind": "unlock",
+				"station": next_locked,
+				"upgrade_id": "",
+				"cost": _unlock_cost_of(stations_def[next_locked]),
+				"name_key": str(stations_def[next_locked].get("name_key", "")),
+				"delta": udelta,
+			})
+	if candidates.is_empty():
+		return {}
+	var best: Dictionary = {}
+	var best_score = null	# BigNum delta/cost
+	var best_aff: Dictionary = {}
+	var best_aff_score = null
+	for c_v in candidates:
+		var c: Dictionary = c_v
+		var score = BigNum.from_float(float(c["delta"])).div(c["cost"])
+		if best_score == null or score.gt(best_score):
+			best_score = score
+			best = c
+		if money.ge(c["cost"]) and (best_aff_score == null or score.gt(best_aff_score)):
+			best_aff_score = score
+			best_aff = c
+	var pick: Dictionary = best if best_aff.is_empty() else best_aff
+	return {
+		"kind": str(pick["kind"]),
+		"station": int(pick["station"]),
+		"upgrade_id": str(pick["upgrade_id"]),
+		"cost": pick["cost"],
+		"affordable": not best_aff.is_empty(),
+		"name_key": str(pick["name_key"]),	# additive: Game localizes into "label"
+		"delta_rps": float(pick["delta"]),	# additive: for tooltips/telemetry
+	}
+
+
+## Execute the current best fix — exactly one upgrade level or one unlock, never more.
+## False when nothing affordable would help.
+func apply_best_fix() -> bool:
+	var fix: Dictionary = best_bottleneck_fix()
+	if fix.is_empty() or not bool(fix["affordable"]):
+		return false
+	if str(fix["kind"]) == "unlock":
+		return unlock_station(int(fix["station"]))
+	return buy_upgrade(int(fix["station"]), str(fix["upgrade_id"]), 1)
+
+
 # ------------------------------------------------------------------ commands
 
 ## Buy `multiplier` levels (1/10/100 or SimTypes.BUY_MAX) of one upgrade. All-or-nothing
@@ -752,6 +972,7 @@ func get_stats_snapshot() -> Dictionary:
 		"stations": station_views,
 		"rps": _sale_price.mul_f(pps),
 		"features": (_mods["features"] as Array).duplicate(),
+		"order": get_order_view(),
 	}
 	_snap_dirty = false
 	return _snap
@@ -770,6 +991,11 @@ func offline_progress(seconds: float) -> Dictionary:
 	var min_seconds: float = _bal_sub_f("offline", "min_seconds", 0.0)
 	if seconds < min_seconds or seconds <= 0.0 or _k_unlocked <= 0:
 		return report
+	# Rush orders do not run offline: an active one is silently cancelled (no failed
+	# event — the player wasn't there to miss it) and the cooldown restarts.
+	if not _order_active.is_empty():
+		_order_active = {}
+		_order_ready_at = time_played + _order_cooldown()
 	var cap_hours: float = _bal_sub_f("offline", "cap_hours_base", 8.0) + float(_mods["offline_cap_add_hours"])
 	var cap_s: float = maxf(cap_hours, 0.0) * 3600.0
 	var credited: float = minf(seconds, cap_s)
@@ -951,6 +1177,9 @@ func serialize() -> Dictionary:
 		"sold_total": _sold_total,
 		"wip_flushed": _wip_flushed,
 		"bn_start_pps": _bn_start_pps,
+		"order_rotation": order_rotation,
+		"order_ready_at": _order_ready_at,
+		"order_active": _order_active.duplicate(),
 		"purchased_skills": purchased_skills.keys(),
 		"milestones_done": milestones_done.keys(),
 		"achievements_done": achievements_done.keys(),
@@ -983,6 +1212,27 @@ func load_state(state: Dictionary) -> bool:
 	_sold_total = float(state.get("sold_total", 0.0))
 	_wip_flushed = float(state.get("wip_flushed", 0.0))
 	_bn_start_pps = float(state.get("bn_start_pps", 0.0))
+	order_rotation = maxi(int(state.get("order_rotation", 0)), 0)
+	_order_ready_at = maxf(float(state.get("order_ready_at", 0.0)), 0.0)
+	_order_active = {}
+	var oa_v: Variant = state.get("order_active", {})
+	if typeof(oa_v) == TYPE_DICTIONARY and not (oa_v as Dictionary).is_empty():
+		var oa: Dictionary = oa_v
+		var oid := str(oa.get("id", ""))
+		var tpl: Dictionary = _order_template_by_id(oid)
+		# Resume only orders whose template still exists and that still have time on the
+		# clock; anything else is dropped silently (boot's offline pass usually clears
+		# in-flight orders anyway).
+		if not tpl.is_empty() and float(oa.get("seconds_left", 0.0)) > 0.0:
+			_order_active = {
+				"id": oid,
+				"name_key": str(oa.get("name_key", str(tpl.get("name_key", "")))),
+				"required": maxf(float(oa.get("required", MIN_ORDER_PARTS)), 1.0),
+				"progress": maxf(float(oa.get("progress", 0.0)), 0.0),
+				"seconds_left": float(oa.get("seconds_left", 0.0)),
+				"reward_mult": float(oa.get("reward_mult", 1.0)),
+				"kp_bonus": maxi(int(oa.get("kp_bonus", 0)), 0),
+			}
 	_kp_last_emit = kp
 	purchased_skills = {}
 	for id in _as_array(state.get("purchased_skills", [])):

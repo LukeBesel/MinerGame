@@ -28,6 +28,10 @@ const HINT_COND_TYPES := [
 	"station_starved_seconds", "bottleneck_stuck_seconds", "affordable_bottleneck_upgrade",
 	"kp_unspent", "can_prestige", "always",
 ]
+const ONBOARDING_TARGETS := [
+	"world_bottleneck", "bottleneck_card", "fix_button", "top_bar_money", "coach", "skills_tab",
+]
+const ONBOARDING_ADVANCE := ["next", "on_upgrade"]
 
 var db: Dictionary = {}
 
@@ -70,6 +74,8 @@ static func load_all() -> Dictionary:
 	out["achievements"] = _load_achievements()
 	out["balance"] = _load_balance()
 	out["hints"] = _load_hints()
+	out["orders"] = _load_orders()
+	out["onboarding"] = _load_onboarding()
 	out["locale"] = _load_locale()
 	return out
 
@@ -293,6 +299,56 @@ static func _load_hints() -> Array:
 	return hints
 
 
+## Rush-order config: scalar spawn knobs plus normalized templates. {} when absent —
+## the sim treats a missing/empty config as "orders disabled".
+static func _load_orders() -> Dictionary:
+	var doc: Variant = _read_json(DATA_DIR + "orders.json")
+	if typeof(doc) != TYPE_DICTIONARY:
+		return {}
+	var d: Dictionary = doc
+	var templates: Array = []
+	var raw: Variant = d.get("templates")
+	if typeof(raw) == TYPE_ARRAY:
+		for t_v in raw:
+			if typeof(t_v) != TYPE_DICTIONARY:
+				continue
+			var t: Dictionary = t_v
+			templates.append({
+				"id": str(t.get("id", "")),
+				"name_key": str(t.get("name_key", "")),
+				"seconds": float(t.get("seconds", 60.0)),
+				"reward_mult": float(t.get("reward_mult", 1.5)),
+				"kp_bonus": int(t.get("kp_bonus", 0)),
+				"weight": int(t.get("weight", 1)),
+			})
+	return {
+		"schema_version": int(d.get("schema_version", 1)),
+		"start_after_seconds": float(d.get("start_after_seconds", 300.0)),
+		"cooldown_seconds": float(d.get("cooldown_seconds", 90.0)),
+		"min_pps": float(d.get("min_pps", 0.3)),
+		"duration_fraction_of_capacity": float(d.get("duration_fraction_of_capacity", 0.7)),
+		"templates": templates,
+	}
+
+
+## Onboarding steps (Array, file order = play order). Targets are validated against the
+## pinned ONBOARDING_TARGETS list the UI anchors to.
+static func _load_onboarding() -> Array:
+	var raw: Array = _doc_array(DATA_DIR + "onboarding.json", "steps")
+	var steps: Array = []
+	for s_v in raw:
+		if typeof(s_v) != TYPE_DICTIONARY:
+			continue
+		var s: Dictionary = s_v
+		steps.append({
+			"id": str(s.get("id", "")),
+			"target": str(s.get("target", "")),
+			"text_key": str(s.get("text_key", "")),
+			"advance": str(s.get("advance", "next")),
+		})
+	return steps
+
+
 static func _load_locale() -> Dictionary:
 	var doc: Variant = _read_json(LOCALE_PATH)
 	if typeof(doc) != TYPE_DICTIONARY:
@@ -318,6 +374,8 @@ static func validate(db_in: Dictionary) -> Array[String]:
 	_validate_achievements(db_in, locale, errors)
 	_validate_hints(db_in, locale, errors)
 	_validate_balance(db_in, errors)
+	_validate_orders(db_in, locale, errors)
+	_validate_onboarding(db_in, locale, errors)
 	return errors
 
 
@@ -609,6 +667,91 @@ static func _validate_hints(db_in: Dictionary, locale: Dictionary, errors: Array
 			errors.append("%s: cond missing" % ctx)
 		elif not HINT_COND_TYPES.has(str(cond_v.get("type", ""))):
 			errors.append("%s: cond type '%s' not in pinned vocabulary" % [ctx, str(cond_v.get("type", ""))])
+
+
+static func _validate_orders(db_in: Dictionary, locale: Dictionary, errors: Array[String]) -> void:
+	var cfg_v: Variant = db_in.get("orders")
+	if typeof(cfg_v) != TYPE_DICTIONARY or (cfg_v as Dictionary).is_empty():
+		errors.append("orders: missing or empty")
+		return
+	var cfg: Dictionary = cfg_v
+	if not _is_num(cfg.get("start_after_seconds")) or float(cfg.get("start_after_seconds", -1.0)) < 0.0:
+		errors.append("orders: start_after_seconds missing or negative")
+	if not _is_num(cfg.get("cooldown_seconds")) or float(cfg.get("cooldown_seconds", 0.0)) <= 0.0:
+		errors.append("orders: cooldown_seconds missing or not > 0")
+	if not _is_num(cfg.get("min_pps")) or float(cfg.get("min_pps", 0.0)) <= 0.0:
+		errors.append("orders: min_pps missing or not > 0")
+	var frac := 0.0
+	if _is_num(cfg.get("duration_fraction_of_capacity")):
+		frac = float(cfg.get("duration_fraction_of_capacity"))
+	if frac <= 0.0 or frac > 1.0:
+		errors.append("orders: duration_fraction_of_capacity must be in (0, 1] — orders must stay beatable")
+	var templates_v: Variant = cfg.get("templates")
+	if typeof(templates_v) != TYPE_ARRAY:
+		errors.append("orders: templates missing or not an Array")
+		return
+	var templates: Array = templates_v
+	if templates.size() < 8 or templates.size() > 10:
+		errors.append("orders: expected 8-10 templates, found %d" % templates.size())
+	var seen: Array = []
+	for t_v in templates:
+		if typeof(t_v) != TYPE_DICTIONARY:
+			errors.append("orders: template is not a Dictionary")
+			continue
+		var t: Dictionary = t_v
+		var tid := str(t.get("id", ""))
+		var ctx := "order '%s'" % tid
+		if tid == "":
+			errors.append("orders: template with empty id")
+		if seen.has(tid):
+			errors.append("%s: duplicate id" % ctx)
+		seen.append(tid)
+		_need_key(locale, str(t.get("name_key", "")), ctx, errors)
+		var seconds := float(t.get("seconds", 0.0))
+		if seconds < 30.0 or seconds > 600.0:
+			errors.append("%s: seconds %.0f outside [30, 600]" % [ctx, seconds])
+		var mult := float(t.get("reward_mult", 0.0))
+		if mult <= 1.0 or mult > 5.0:
+			errors.append("%s: reward_mult %.2f outside (1, 5]" % [ctx, mult])
+		var kp_bonus := int(t.get("kp_bonus", -1))
+		if kp_bonus < 0 or kp_bonus > 1:
+			errors.append("%s: kp_bonus must be 0 or 1" % ctx)
+		if int(t.get("weight", 0)) < 1:
+			errors.append("%s: weight must be >= 1" % ctx)
+
+
+static func _validate_onboarding(db_in: Dictionary, locale: Dictionary, errors: Array[String]) -> void:
+	var arr_v: Variant = db_in.get("onboarding")
+	if typeof(arr_v) != TYPE_ARRAY:
+		errors.append("onboarding: missing or not an Array")
+		return
+	var arr: Array = arr_v
+	if arr.size() < 5 or arr.size() > 6:
+		errors.append("onboarding: expected 5-6 steps, found %d" % arr.size())
+	var seen: Array = []
+	var on_upgrade_steps := 0
+	for s_v in arr:
+		if typeof(s_v) != TYPE_DICTIONARY:
+			errors.append("onboarding: step is not a Dictionary")
+			continue
+		var s: Dictionary = s_v
+		var sid := str(s.get("id", ""))
+		var ctx := "onboarding step '%s'" % sid
+		if sid == "":
+			errors.append("onboarding: step with empty id")
+		if seen.has(sid):
+			errors.append("%s: duplicate id" % ctx)
+		seen.append(sid)
+		if not ONBOARDING_TARGETS.has(str(s.get("target", ""))):
+			errors.append("%s: target '%s' not in pinned target list" % [ctx, str(s.get("target", ""))])
+		_need_key(locale, str(s.get("text_key", "")), ctx, errors)
+		var adv := str(s.get("advance", ""))
+		if not ONBOARDING_ADVANCE.has(adv):
+			errors.append("%s: advance '%s' not in %s" % [ctx, adv, str(ONBOARDING_ADVANCE)])
+		if adv == "on_upgrade":
+			on_upgrade_steps += 1
+	if on_upgrade_steps != 1:
+		errors.append("onboarding: exactly one step must advance on_upgrade (found %d)" % on_upgrade_steps)
 
 
 static func _validate_balance(db_in: Dictionary, errors: Array[String]) -> void:

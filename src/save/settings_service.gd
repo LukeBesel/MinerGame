@@ -11,6 +11,8 @@ const CAMERA_SENS_MAX := 3.0
 
 const NUMBER_FORMATS := ["suffix", "scientific"]
 
+const UI_MODES := ["simple", "advanced"]
+
 ## Maps a settings key to the AudioServer bus it drives. "Master" always exists; "Music"/"SFX"
 ## are created by the juice agent's AudioDirector, which boots *after* this autoload (see the
 ## autoload order in ARCHITECTURE.md §3) — _apply_volume() guards a missing bus (index -1), and
@@ -56,6 +58,16 @@ var camera_sensitivity: float = 1.0:
 		camera_sensitivity = float(clamp_field("camera_sensitivity", value))
 		_on_field_set("camera_sensitivity", camera_sensitivity)
 
+var ui_mode: String = "simple":
+	set(value):
+		ui_mode = String(clamp_field("ui_mode", value))
+		_on_field_set("ui_mode", ui_mode)
+
+var onboarding_done: bool = false:
+	set(value):
+		onboarding_done = bool(clamp_field("onboarding_done", value))
+		_on_field_set("onboarding_done", onboarding_done)
+
 var _loading := false
 var _save_timer: Timer
 
@@ -83,6 +95,8 @@ func set_setting(key: String, value: Variant) -> void:
 		"screen_shake": screen_shake = value
 		"number_format": number_format = value
 		"camera_sensitivity": camera_sensitivity = value
+		"ui_mode": ui_mode = value
+		"onboarding_done": onboarding_done = value
 		_: push_warning("SettingsService.set_setting: unknown key '%s'" % key)
 
 
@@ -95,6 +109,8 @@ func current_dict() -> Dictionary:
 		"screen_shake": screen_shake,
 		"number_format": number_format,
 		"camera_sensitivity": camera_sensitivity,
+		"ui_mode": ui_mode,
+		"onboarding_done": onboarding_done,
 	}
 
 
@@ -132,6 +148,8 @@ func _apply_dict(d: Dictionary) -> void:
 	screen_shake = d.get("screen_shake", 0.3)
 	number_format = d.get("number_format", "suffix")
 	camera_sensitivity = d.get("camera_sensitivity", 1.0)
+	ui_mode = d.get("ui_mode", "simple")
+	onboarding_done = d.get("onboarding_done", false)
 
 
 func _on_field_set(key: String, value: Variant) -> void:
@@ -178,6 +196,8 @@ static func default_settings() -> Dictionary:
 		"screen_shake": 0.3,
 		"number_format": "suffix",
 		"camera_sensitivity": 1.0,
+		"ui_mode": "simple",
+		"onboarding_done": false,
 	}
 
 
@@ -190,10 +210,14 @@ static func clamp_field(key: String, value: Variant) -> Variant:
 			return clampf(_as_float(value, float(fallback)), 0.0, 1.0)
 		"camera_sensitivity":
 			return clampf(_as_float(value, float(fallback)), CAMERA_SENS_MIN, CAMERA_SENS_MAX)
-		"reduce_motion":
+		"reduce_motion", "onboarding_done":
 			return value if typeof(value) == TYPE_BOOL else fallback
 		"number_format":
 			if typeof(value) == TYPE_STRING and NUMBER_FORMATS.has(value):
+				return value
+			return fallback
+		"ui_mode":
+			if typeof(value) == TYPE_STRING and UI_MODES.has(value):
 				return value
 			return fallback
 		_:

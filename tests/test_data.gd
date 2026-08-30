@@ -381,6 +381,91 @@ func test_balance_pinned_keys_and_sanity() -> void:
 			"%s base changeover well under the changeover period" % str(s["id"]))
 
 
+func test_orders_data_shape_and_ranges() -> void:
+	var db: Dictionary = _db()
+	assert_true(db.has("orders"), "db carries the orders config")
+	var cfg: Dictionary = db["orders"]
+	# Pinned spawn knobs from the design schema.
+	assert_near(float(cfg["start_after_seconds"]), 300.0, 1e-9, "orders start after 5 min")
+	assert_near(float(cfg["cooldown_seconds"]), 90.0, 1e-9)
+	assert_near(float(cfg["min_pps"]), 0.3, 1e-9)
+	assert_near(float(cfg["duration_fraction_of_capacity"]), 0.7, 1e-9,
+			"orders sized under capacity so they stay beatable")
+	var templates: Array = cfg["templates"]
+	assert_true(templates.size() >= 8 and templates.size() <= 10,
+			"8-10 templates, found %d" % templates.size())
+	var locale: Dictionary = db["locale"]
+	var seen: Array = []
+	var kp_templates := 0
+	for t_v in templates:
+		var t: Dictionary = t_v
+		var tid := str(t["id"])
+		assert_false(seen.has(tid), "unique order id '%s'" % tid)
+		seen.append(tid)
+		assert_true(locale.has(str(t["name_key"])), "order name key '%s' resolves" % str(t["name_key"]))
+		var seconds := float(t["seconds"])
+		assert_true(seconds >= 60.0 and seconds <= 240.0,
+				"'%s' seconds %.0f in design band [60, 240]" % [tid, seconds])
+		var mult := float(t["reward_mult"])
+		assert_true(mult >= 1.5 and mult <= 3.0,
+				"'%s' reward_mult %.2f in design band [1.5, 3.0]" % [tid, mult])
+		var kp_bonus := int(t["kp_bonus"])
+		assert_true(kp_bonus == 0 or kp_bonus == 1, "'%s' kp_bonus 0 or 1" % tid)
+		if kp_bonus == 1:
+			kp_templates += 1
+		assert_true(int(t["weight"]) >= 1, "'%s' weight >= 1" % tid)
+	assert_true(kp_templates >= 1, "at least one order pays a Kaizen Point")
+
+
+func test_onboarding_data_steps() -> void:
+	var db: Dictionary = _db()
+	assert_true(db.has("onboarding"), "db carries the onboarding steps")
+	var steps: Array = db["onboarding"]
+	assert_true(steps.size() >= 5 and steps.size() <= 6, "5-6 steps, found %d" % steps.size())
+	var locale: Dictionary = db["locale"]
+	var on_upgrade := 0
+	var seen: Array = []
+	for s_v in steps:
+		var s: Dictionary = s_v
+		assert_false(seen.has(str(s["id"])), "unique step id")
+		seen.append(str(s["id"]))
+		assert_true(Loader.ONBOARDING_TARGETS.has(str(s["target"])),
+				"target '%s' in the pinned list" % str(s["target"]))
+		assert_true(locale.has(str(s["text_key"])), "step text key resolves")
+		assert_true(Loader.ONBOARDING_ADVANCE.has(str(s["advance"])), "advance mode valid")
+		if str(s["advance"]) == "on_upgrade":
+			on_upgrade += 1
+			assert_eq(str(s["target"]), "fix_button",
+					"the on_upgrade step is the FIX IT step")
+	assert_eq(on_upgrade, 1, "exactly one step auto-advances on station_upgraded")
+	assert_eq(str((steps[0] as Dictionary)["target"]), "world_bottleneck",
+			"the tour opens on the bottleneck — the whole game in one glance")
+
+
+func test_locale_assist_order_onboarding_keys() -> void:
+	# This exact UI-facing list is pinned — the UI agent codes against it verbatim.
+	var db: Dictionary = _db()
+	var locale: Dictionary = db["locale"]
+	assert_eq(locale.get("ui.fix_it", ""), "Fix it — {0}")
+	assert_eq(locale.get("ui.fix_saving", ""), "Save up — {0}")
+	assert_eq(locale.get("ui.fix_unlock", ""), "Extend the line — {0}")
+	assert_eq(locale.get("ui.advanced_toggle", ""), "Advanced")
+	assert_eq(locale.get("ui.simple_toggle", ""), "Simple")
+	assert_eq(locale.get("ui.order_title", ""), "Rush order")
+	assert_eq(locale.get("ui.order_progress", ""), "{0} / {1}")
+	assert_eq(locale.get("ui.order_time_left", ""), "{0}s")
+	assert_eq(locale.get("ui.order_reward", ""), "Bonus ×{0}")
+	assert_eq(locale.get("ui.order_done", ""), "Order shipped! +{0}")
+	assert_eq(locale.get("ui.order_missed", ""), "Order missed — another will come along.")
+	assert_eq(locale.get("ui.next", ""), "Next")
+	assert_eq(locale.get("ui.skip", ""), "Skip")
+	assert_eq(locale.get("ui.done", ""), "Got it")
+	for i in range(1, 7):
+		assert_true(locale.has("onboarding.step%d" % i), "onboarding.step%d present" % i)
+		assert_true(str(locale.get("onboarding.step%d" % i, "")).length() > 10,
+				"onboarding step %d has real text" % i)
+
+
 func test_lookup_helpers() -> void:
 	var inst = Loader.new()
 	inst.db = Loader.load_all()

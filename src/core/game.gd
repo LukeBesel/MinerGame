@@ -170,6 +170,40 @@ func get_skill_state(node_id: String) -> Dictionary:
 	return sim.get_skill_state(node_id)
 
 
+## Active rush-order view with `name` localized; {} when no order is running.
+func get_order_view() -> Dictionary:
+	if sim == null:
+		return {}
+	var view: Dictionary = sim.get_order_view()
+	_localize_order(view)
+	return view
+
+
+## Best-fix view for the FIX IT button: sim's best_bottleneck_fix() plus a localized
+## `label` (the upgrade's display name, or the station name for an unlock). {} when
+## nothing would help the bottleneck.
+func get_best_fix_view() -> Dictionary:
+	if sim == null:
+		return {}
+	var fix: Dictionary = sim.best_bottleneck_fix()
+	if fix.is_empty():
+		return fix
+	fix["label"] = L.t(str(fix.get("name_key", "")))
+	return fix
+
+
+## Execute the current best fix — exactly one upgrade level or one unlock, always at
+## multiplier x1 regardless of the global buy multiplier.
+func apply_best_fix() -> bool:
+	if sim == null:
+		return false
+	var ok: bool = sim.apply_best_fix()
+	if ok:
+		_emit_events()
+		_emit_stats()
+	return ok
+
+
 ## Same dictionary as the last sim_stats emission (fresh-built if none yet).
 func get_stats_snapshot() -> Dictionary:
 	if sim == null:
@@ -190,10 +224,18 @@ func _build_snapshot() -> Dictionary:
 	var snap: Dictionary = sim.get_stats_snapshot()
 	for view in snap.get("stations", []):
 		_localize_station(view)
+	var order_v: Variant = snap.get("order", {})
+	if typeof(order_v) == TYPE_DICTIONARY:
+		_localize_order(order_v)
 	return snap
 
 
 func _localize_station(view: Dictionary) -> void:
+	if view.has("name_key"):
+		view["name"] = L.t(str(view["name_key"]))
+
+
+func _localize_order(view: Dictionary) -> void:
 	if view.has("name_key"):
 		view["name"] = L.t(str(view["name_key"]))
 
@@ -232,6 +274,12 @@ func _emit_events() -> void:
 				EventBus.prestige_performed.emit(int(ev["cip_gained"]), float(ev["new_multiplier"]))
 			"achievement_unlocked":
 				EventBus.achievement_unlocked.emit(str(ev["id"]))
+			"order_started":
+				EventBus.order_started.emit(str(ev["id"]))
+			"order_completed":
+				EventBus.order_completed.emit(str(ev["id"]), ev["reward"])
+			"order_failed":
+				EventBus.order_failed.emit(str(ev["id"]))
 			_:
 				push_warning("Game: unknown sim event '%s'" % str(ev.get("t", "")))
 

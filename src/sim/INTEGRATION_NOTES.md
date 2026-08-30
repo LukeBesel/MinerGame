@@ -128,3 +128,93 @@ test files present at run time; `AUTOPLAY summary: prestige_time=1695.0s (target
 
 All sim scripts compile standalone with `--check-only` with zero errors (no filter);
 `src/core/game.gd` passes with only the documented autoload-name false positives filtered.
+
+## Extension pass — 2026-08-30 (rush orders, assist API, settings exception)
+
+### Rush orders (`sim_engine.gd` + `game.gd`, data-driven via `db["orders"]`)
+
+- **Mechanics.** At most one active order. Spawn gate (checked per tick): `time_played >=
+  orders.start_after_seconds` AND `time_played >= ready_at` (cooldown since the last order
+  *ended* — success, timeout, offline cancel or prestige) AND instantaneous `pps >=
+  orders.min_pps`. Required parts = `round(estimate_steady_pps() x template.seconds x
+  orders.duration_fraction_of_capacity)`, floored at 10 (`MIN_ORDER_PARTS`) — sized UNDER
+  the pace the player already sustains, so every order is beatable and pushing ships it
+  early. Progress counts sold parts (`pps x dt`) while active. Success pays
+  `required x current sale price x (reward_mult - 1)` (BigNum; "current" price on purpose —
+  a mid-order unlock under value-add pricing raises the payout) plus `kp_bonus`; timeout
+  queues a failure and costs nothing. **The bonus is added to `money_earned` too** (it is
+  income; `money_earned` triggers can see it — same treatment as scrap refunds).
+- **Determinism (§6, no RNG).** The template is picked by rotating the persisted
+  `order_rotation` counter over a weight-expanded index list built in `_setup_db`
+  (weight 3 = three slots). Identical runs produce identical order sequences
+  (test-enforced).
+- **Events** queued/drained like everything else: `{"t":"order_started","id"}`,
+  `{"t":"order_completed","id","reward":BigNum}`, `{"t":"order_failed","id"}`; Game maps
+  them onto the pre-registered EventBus signals (reward passed through).
+- **Views.** `sim.get_order_view()` -> `{}` when none, else `{id, name, name_key,
+  required, progress (clamped to required), seconds_left, reward_mult, reward_preview:
+  BigNum}`; `name` carries the raw `name_key` and `Game.get_order_view()` localizes it
+  (station-view convention). The snapshot additionally carries the view under the
+  additive key `"order"` (localized by Game's `_build_snapshot`).
+- **Not offline, not through prestige.** `offline_progress` (past its min_seconds gate)
+  silently cancels an active order — no failed event, the player wasn't there to miss it —
+  and restarts the cooldown from `time_played` (which does not advance offline, so the
+  cooldown runs in live play after return). A sub-`min_seconds` absence leaves the order
+  untouched. Prestige (`_reset_run_state(false)`) also drops an in-flight order silently +
+  restarts the cooldown (the factory was just sold).
+- **Serialization (additive, still save version 1).** `order_rotation`,
+  `order_ready_at`, `order_active` (pure JSON scalars). `load_state` defaults them when
+  absent — pre-orders saves load unchanged — and resumes an active order only if its
+  template still exists and `seconds_left > 0`; anything else is dropped silently.
+- **Disabled gracefully.** Empty/missing `db["orders"]` (all test fixtures) = no orders,
+  zero behavior change; that plus additive save keys is why every pre-existing test
+  passes untouched.
+
+### Assist API — the FIX IT backend
+
+- `sim.best_bottleneck_fix() -> Dictionary`: `{}` when no bottleneck or no move would
+  raise steady rps. Otherwise scores the bottleneck station's four tracks (one level
+  each, max_level respected, `estimate_upgrade_delta_rps`) plus the next unlock
+  (`estimate_unlock_delta_rps`, > 0 essentially only under value-add pricing) by
+  delta-rps/cost (BigNum-safe) and returns the best AFFORDABLE move — or, when nothing is
+  affordable, the best move overall with `"affordable": false` (UI shows "Save up — $X").
+  Shape: pinned `{kind: "upgrade"|"unlock", station, upgrade_id ("" for unlock), cost:
+  BigNum, affordable}` plus additive `name_key` (Game turns it into `label`) and
+  `delta_rps` (tooltips). Because deltas are LINE deltas, the assist sees through
+  upgrades that speed the station but not the line (test-enforced).
+- `sim.apply_best_fix() -> bool` executes exactly that one purchase (one level / one
+  unlock, always multiplier 1); refuses unaffordable fixes.
+- `Game.get_best_fix_view()` adds localized `label` = upgrade display name or station
+  name (via the additive `name_key`); `Game.apply_best_fix()` delegates to the sim (so
+  the global buy multiplier can never leak in) and emits events/stats on success.
+
+### Granted exception used
+
+Per this pass's mandate, exactly two fields were added to `src/save/settings_service.gd`
+following its existing pattern (property setter -> `clamp_field` funnel ->
+`settings_changed` emit -> debounced save; in `default_settings`/`current_dict`/
+`_apply_dict`/`set_setting`): `ui_mode: String` ("simple"|"advanced", default "simple",
+`UI_MODES` const) and `onboarding_done: bool` (default false). Covered hermetically in
+`tests/test_assist.gd::test_settings_ui_mode_and_onboarding_fields` via runtime `load()`
+(keeps the test file clean under unfiltered `--check-only`; `test_settings.gd` untouched
+and green).
+
+### Pacing impact (measured, real data)
+
+Scratch probe, greedy autoplayer on `Data.load_all()`: **without orders prestige=1715 s /
+38 distinct events in 15 min; with orders prestige=1700 s / 38** (bot started 9 orders,
+completed 8, failed 0 — they auto-complete at steady state by design, duration_fraction
+0.7). Orders are a gentle accelerant (~1% on first prestige) — no balance retune needed;
+the pinned gate passes with real margin. (The "45 distinct events" in older notes
+predates the integrator's post-notes changes; 38 is today's baseline both with and
+without orders.)
+
+### Validation
+
+Full suite: `=== TESTS passed=155 failed=0 asserts=1717 in ~9.3s ===` — the 126
+pre-existing tests + this pass's 21 (10 `test_orders.gd` + 8 `test_assist.gd` + 3 new in
+`test_data.gd`) + 8 the UI agent landed in `test_ui.gd` in parallel — including
+test_save/test_settings and `AUTOPLAY summary: prestige_time=1700.0s (target
+1500..3000s) distinct_events_15min=38`. `--check-only`: sim files, loader and both new
+test files pass with NO filter; `game.gd`/`settings_service.gd` pass with only the
+documented autoload-name false positives filtered.
