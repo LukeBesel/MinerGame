@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased] — accessibility + content + art wave
+
+- **Simple mode (new default)**: one glowing FIX IT button on the bottleneck buys the best
+  fix; Advanced toggle restores full upgrade grids. First-run 5-step spotlight onboarding
+  (skippable, one-time).
+- **Rush Orders**: timed customer orders sized to your throughput — bonus payouts, zero
+  failure penalty; widget with progress/countdown.
+- **Art overhaul**: real CC0 PBR materials (ambientCG), AgX grading, all six machines
+  rebuilt as detailed assemblies, dressed hall (pallets, racking, mezzanine, signage,
+  decals), belt rails/rollers/part variants.
+- Browser-verified end-to-end (Chromium): onboarding -> FIX IT purchase -> bottleneck
+  cleared pulse; zero console errors. Suite 155/0 (1717 asserts).
+- Hosted playable demo: webdemo/ served via raw.githack from this branch; GitHub Pages
+  workflow activates on merge to main.
+
 ## [Unreleased] — full vertical slice (Phases 0–4 scope, parallel build)
 
 ### Phase 0 — Foundation
