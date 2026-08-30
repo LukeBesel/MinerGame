@@ -1,0 +1,89 @@
+{
+	"schema_version": 1,
+	"start_after_seconds": 300,
+	"cooldown_seconds": 90,
+	"min_pps": 0.3,
+	"duration_fraction_of_capacity": 0.7,
+	"templates": [
+		{
+			"id": "mega_lo_mart",
+			"name_key": "order.mega_lo_mart",
+			"seconds": 180,
+			"reward_mult": 1.5,
+			"kp_bonus": 0,
+			"weight": 3
+		},
+		{
+			"id": "consultant_rush",
+			"name_key": "order.consultant_rush",
+			"seconds": 90,
+			"reward_mult": 2.0,
+			"kp_bonus": 0,
+			"weight": 2
+		},
+		{
+			"id": "q4_panic",
+			"name_key": "order.q4_panic",
+			"seconds": 120,
+			"reward_mult": 1.8,
+			"kp_bonus": 0,
+			"weight": 3
+		},
+		{
+			"id": "trade_show",
+			"name_key": "order.trade_show",
+			"seconds": 150,
+			"reward_mult": 1.7,
+			"kp_bonus": 0,
+			"weight": 2
+		},
+		{
+			"id": "rival_recall",
+			"name_key": "order.rival_recall",
+			"seconds": 240,
+			"reward_mult": 1.6,
+			"kp_bonus": 0,
+			"weight": 2
+		},
+		{
+			"id": "mystery_pallet",
+			"name_key": "order.mystery_pallet",
+			"seconds": 60,
+			"reward_mult": 2.5,
+			"kp_bonus": 0,
+			"weight": 1
+		},
+		{
+			"id": "space_program",
+			"name_key": "order.space_program",
+			"seconds": 210,
+			"reward_mult": 2.2,
+			"kp_bonus": 1,
+			"weight": 1
+		},
+		{
+			"id": "intern_zero",
+			"name_key": "order.intern_zero",
+			"seconds": 75,
+			"reward_mult": 3.0,
+			"kp_bonus": 1,
+			"weight": 1
+		},
+		{
+			"id": "museum_shop",
+			"name_key": "order.museum_shop",
+			"seconds": 120,
+			"reward_mult": 1.5,
+			"kp_bonus": 0,
+			"weight": 2
+		},
+		{
+			"id": "auditor_visit",
+			"name_key": "order.auditor_visit",
+			"seconds": 100,
+			"reward_mult": 2.0,
+			"kp_bonus": 1,
+			"weight": 1
+		}
+	]
+}

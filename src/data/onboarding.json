@@ -1,0 +1,41 @@
+{
+	"schema_version": 1,
+	"steps": [
+		{
+			"id": "bottleneck",
+			"target": "world_bottleneck",
+			"text_key": "onboarding.step1",
+			"advance": "next"
+		},
+		{
+			"id": "fix",
+			"target": "fix_button",
+			"text_key": "onboarding.step2",
+			"advance": "on_upgrade"
+		},
+		{
+			"id": "money",
+			"target": "top_bar_money",
+			"text_key": "onboarding.step3",
+			"advance": "next"
+		},
+		{
+			"id": "coach",
+			"target": "coach",
+			"text_key": "onboarding.step4",
+			"advance": "next"
+		},
+		{
+			"id": "skills",
+			"target": "skills_tab",
+			"text_key": "onboarding.step5",
+			"advance": "next"
+		},
+		{
+			"id": "done",
+			"target": "world_bottleneck",
+			"text_key": "onboarding.step6",
+			"advance": "next"
+		}
+	]
+}

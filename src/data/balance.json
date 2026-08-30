@@ -1,0 +1,30 @@
+{
+	"schema_version": 1,
+	"price_per_part": 1.5,
+	"value_add_pricing": true,
+	"starting_money": 15,
+	"tick_rate": 10,
+	"buffer_base_cap": 100,
+	"changeover_period_seconds": 600,
+	"offline": {
+		"cap_hours_base": 8,
+		"rate": 1.0,
+		"min_seconds": 60
+	},
+	"prestige": {
+		"min_lifetime_parts": 220000,
+		"divisor": 50000,
+		"exponent": 0.5,
+		"multiplier_per_cip": 0.1
+	},
+	"autosave_seconds": 30,
+	"visual": {
+		"part_event_max_pps": 8
+	},
+	"pacing": {
+		"first_prestige_target_minutes": [
+			25,
+			50
+		]
+	}
+}

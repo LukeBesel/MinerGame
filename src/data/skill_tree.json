@@ -1,0 +1,383 @@
+{
+	"schema_version": 1,
+	"nodes": [
+		{
+			"id": "powered_conveyors", "branch": "flow", "row": 0,
+			"name_key": "skill.powered_conveyors.name", "tip_key": "skill.powered_conveyors.tip",
+			"cost": 1, "prereqs": [],
+			"effects": [
+				{ "type": "unlock_feature", "feature": "conveyor_speed_visual" },
+				{ "type": "global_throughput_mult", "value": 1.03 }
+			]
+		},
+		{
+			"id": "kanban", "branch": "flow", "row": 1,
+			"name_key": "skill.kanban.name", "tip_key": "skill.kanban.tip",
+			"cost": 2, "prereqs": ["powered_conveyors"],
+			"effects": [
+				{ "type": "buffer_cap_mult", "value": 0.5 },
+				{ "type": "global_throughput_mult", "value": 1.05 }
+			]
+		},
+		{
+			"id": "value_stream_map", "branch": "flow", "row": 2,
+			"name_key": "skill.value_stream_map.name", "tip_key": "skill.value_stream_map.tip",
+			"cost": 2, "prereqs": ["kanban"],
+			"effects": [ { "type": "global_throughput_mult", "value": 1.06 } ]
+		},
+		{
+			"id": "spaghetti_diagram", "branch": "flow", "row": 2,
+			"name_key": "skill.spaghetti_diagram.name", "tip_key": "skill.spaghetti_diagram.tip",
+			"cost": 2, "prereqs": ["kanban"],
+			"effects": [
+				{ "type": "global_throughput_mult", "value": 1.04 },
+				{ "type": "stat_mult", "stat": "cycle_time", "scope": "all", "value": 0.98 }
+			]
+		},
+		{
+			"id": "heijunka", "branch": "flow", "row": 3,
+			"name_key": "skill.heijunka.name", "tip_key": "skill.heijunka.tip",
+			"cost": 3, "prereqs": ["value_stream_map"],
+			"effects": [
+				{ "type": "stat_mult", "stat": "changeover_time", "scope": "all", "value": 0.85 },
+				{ "type": "global_throughput_mult", "value": 1.03 }
+			]
+		},
+		{
+			"id": "one_piece_flow", "branch": "flow", "row": 4,
+			"name_key": "skill.one_piece_flow.name", "tip_key": "skill.one_piece_flow.tip",
+			"cost": 4, "prereqs": ["heijunka"],
+			"effects": [
+				{ "type": "buffer_cap_mult", "value": 0.6 },
+				{ "type": "global_throughput_mult", "value": 1.1 }
+			]
+		},
+		{
+			"id": "cellular_layout", "branch": "flow", "row": 5,
+			"name_key": "skill.cellular_layout.name", "tip_key": "skill.cellular_layout.tip",
+			"cost": 5, "prereqs": ["one_piece_flow"],
+			"effects": [ { "type": "global_throughput_mult", "value": 1.08 } ]
+		},
+		{
+			"id": "water_spider", "branch": "flow", "row": 6,
+			"name_key": "skill.water_spider.name", "tip_key": "skill.water_spider.tip",
+			"cost": 7, "prereqs": ["cellular_layout"],
+			"effects": [
+				{ "type": "stat_toward_one", "stat": "uptime", "scope": "all", "value": 0.05 },
+				{ "type": "global_throughput_mult", "value": 1.04 }
+			]
+		},
+		{
+			"id": "pull_system", "branch": "flow", "row": 7,
+			"name_key": "skill.pull_system.name", "tip_key": "skill.pull_system.tip",
+			"cost": 9, "prereqs": ["water_spider"],
+			"effects": [
+				{ "type": "buffer_cap_mult", "value": 0.75 },
+				{ "type": "global_throughput_mult", "value": 1.08 }
+			]
+		},
+		{
+			"id": "drum_buffer_rope", "branch": "flow", "row": 8,
+			"name_key": "skill.drum_buffer_rope.name", "tip_key": "skill.drum_buffer_rope.tip",
+			"cost": 14, "prereqs": ["pull_system"],
+			"effects": [ { "type": "global_throughput_mult", "value": 1.15 } ]
+		},
+		{
+			"id": "five_s", "branch": "reliability", "row": 0,
+			"name_key": "skill.five_s.name", "tip_key": "skill.five_s.tip",
+			"cost": 1, "prereqs": [],
+			"effects": [ { "type": "stat_toward_one", "stat": "uptime", "scope": "all", "value": 0.05 } ]
+		},
+		{
+			"id": "autonomous_maintenance", "branch": "reliability", "row": 1,
+			"name_key": "skill.autonomous_maintenance.name", "tip_key": "skill.autonomous_maintenance.tip",
+			"cost": 2, "prereqs": ["five_s"],
+			"effects": [ { "type": "stat_toward_one", "stat": "uptime", "scope": "all", "value": 0.08 } ]
+		},
+		{
+			"id": "root_cause_analysis", "branch": "reliability", "row": 2,
+			"name_key": "skill.root_cause_analysis.name", "tip_key": "skill.root_cause_analysis.tip",
+			"cost": 2, "prereqs": ["autonomous_maintenance"],
+			"effects": [ { "type": "stat_toward_one", "stat": "uptime", "scope": "all", "value": 0.08 } ]
+		},
+		{
+			"id": "preventive_maintenance", "branch": "reliability", "row": 3,
+			"name_key": "skill.preventive_maintenance.name", "tip_key": "skill.preventive_maintenance.tip",
+			"cost": 3, "prereqs": ["root_cause_analysis"],
+			"effects": [ { "type": "stat_toward_one", "stat": "uptime", "scope": "all", "value": 0.1 } ]
+		},
+		{
+			"id": "oee_dashboard", "branch": "reliability", "row": 3,
+			"name_key": "skill.oee_dashboard.name", "tip_key": "skill.oee_dashboard.tip",
+			"cost": 3, "prereqs": ["root_cause_analysis"],
+			"effects": [ { "type": "global_throughput_mult", "value": 1.05 } ]
+		},
+		{
+			"id": "tpm", "branch": "reliability", "row": 4,
+			"name_key": "skill.tpm.name", "tip_key": "skill.tpm.tip",
+			"cost": 4, "prereqs": ["preventive_maintenance"],
+			"effects": [
+				{ "type": "stat_toward_one", "stat": "uptime", "scope": "all", "value": 0.1 },
+				{ "type": "global_throughput_mult", "value": 1.05 }
+			]
+		},
+		{
+			"id": "spare_parts_kanban", "branch": "reliability", "row": 5,
+			"name_key": "skill.spare_parts_kanban.name", "tip_key": "skill.spare_parts_kanban.tip",
+			"cost": 5, "prereqs": ["tpm"],
+			"effects": [
+				{ "type": "stat_toward_one", "stat": "uptime", "scope": "station:weld", "value": 0.15 },
+				{ "type": "stat_toward_one", "stat": "uptime", "scope": "all", "value": 0.04 }
+			]
+		},
+		{
+			"id": "condition_monitoring", "branch": "reliability", "row": 6,
+			"name_key": "skill.condition_monitoring.name", "tip_key": "skill.condition_monitoring.tip",
+			"cost": 7, "prereqs": ["spare_parts_kanban"],
+			"effects": [ { "type": "stat_toward_one", "stat": "uptime", "scope": "all", "value": 0.1 } ]
+		},
+		{
+			"id": "lights_out_shift", "branch": "reliability", "row": 7,
+			"name_key": "skill.lights_out_shift.name", "tip_key": "skill.lights_out_shift.tip",
+			"cost": 9, "prereqs": ["condition_monitoring"],
+			"effects": [
+				{ "type": "offline_cap_add_hours", "value": 4 },
+				{ "type": "offline_rate_mult", "value": 1.2 }
+			]
+		},
+		{
+			"id": "zero_breakdowns", "branch": "reliability", "row": 8,
+			"name_key": "skill.zero_breakdowns.name", "tip_key": "skill.zero_breakdowns.tip",
+			"cost": 13, "prereqs": ["lights_out_shift"],
+			"effects": [
+				{ "type": "stat_toward_one", "stat": "uptime", "scope": "all", "value": 0.25 },
+				{ "type": "global_throughput_mult", "value": 1.05 }
+			]
+		},
+		{
+			"id": "check_sheets", "branch": "quality", "row": 0,
+			"name_key": "skill.check_sheets.name", "tip_key": "skill.check_sheets.tip",
+			"cost": 1, "prereqs": [],
+			"effects": [ { "type": "stat_toward_one", "stat": "quality", "scope": "all", "value": 0.06 } ]
+		},
+		{
+			"id": "andon_cord", "branch": "quality", "row": 1,
+			"name_key": "skill.andon_cord.name", "tip_key": "skill.andon_cord.tip",
+			"cost": 2, "prereqs": ["check_sheets"],
+			"effects": [
+				{ "type": "scrap_refund_frac", "value": 0.25 },
+				{ "type": "stat_toward_one", "stat": "quality", "scope": "all", "value": 0.04 }
+			]
+		},
+		{
+			"id": "poka_yoke", "branch": "quality", "row": 2,
+			"name_key": "skill.poka_yoke.name", "tip_key": "skill.poka_yoke.tip",
+			"cost": 3, "prereqs": ["andon_cord"],
+			"effects": [ { "type": "stat_toward_one", "stat": "quality", "scope": "all", "value": 0.12 } ]
+		},
+		{
+			"id": "spc", "branch": "quality", "row": 3,
+			"name_key": "skill.spc.name", "tip_key": "skill.spc.tip",
+			"cost": 3, "prereqs": ["poka_yoke"],
+			"effects": [ { "type": "stat_toward_one", "stat": "quality", "scope": "all", "value": 0.1 } ]
+		},
+		{
+			"id": "rework_loop", "branch": "quality", "row": 3,
+			"name_key": "skill.rework_loop.name", "tip_key": "skill.rework_loop.tip",
+			"cost": 3, "prereqs": ["poka_yoke"],
+			"effects": [ { "type": "scrap_refund_frac", "value": 0.2 } ]
+		},
+		{
+			"id": "jidoka", "branch": "quality", "row": 4,
+			"name_key": "skill.jidoka.name", "tip_key": "skill.jidoka.tip",
+			"cost": 4, "prereqs": ["spc"],
+			"effects": [
+				{ "type": "stat_toward_one", "stat": "quality", "scope": "all", "value": 0.08 },
+				{ "type": "global_throughput_mult", "value": 1.04 }
+			]
+		},
+		{
+			"id": "certified_supplier", "branch": "quality", "row": 5,
+			"name_key": "skill.certified_supplier.name", "tip_key": "skill.certified_supplier.tip",
+			"cost": 5, "prereqs": ["jidoka"],
+			"effects": [ { "type": "price_mult", "value": 1.1 } ]
+		},
+		{
+			"id": "dmaic", "branch": "quality", "row": 6,
+			"name_key": "skill.dmaic.name", "tip_key": "skill.dmaic.tip",
+			"cost": 7, "prereqs": ["certified_supplier"],
+			"effects": [
+				{ "type": "stat_toward_one", "stat": "quality", "scope": "all", "value": 0.12 },
+				{ "type": "scrap_refund_frac", "value": 0.15 }
+			]
+		},
+		{
+			"id": "quality_at_source", "branch": "quality", "row": 7,
+			"name_key": "skill.quality_at_source.name", "tip_key": "skill.quality_at_source.tip",
+			"cost": 9, "prereqs": ["dmaic"],
+			"effects": [
+				{ "type": "stat_toward_one", "stat": "quality", "scope": "all", "value": 0.12 },
+				{ "type": "global_throughput_mult", "value": 1.04 }
+			]
+		},
+		{
+			"id": "built_in_quality", "branch": "quality", "row": 8,
+			"name_key": "skill.built_in_quality.name", "tip_key": "skill.built_in_quality.tip",
+			"cost": 13, "prereqs": ["quality_at_source"],
+			"effects": [
+				{ "type": "stat_toward_one", "stat": "quality", "scope": "all", "value": 0.2 },
+				{ "type": "price_mult", "value": 1.1 }
+			]
+		},
+		{
+			"id": "time_study", "branch": "speed", "row": 0,
+			"name_key": "skill.time_study.name", "tip_key": "skill.time_study.tip",
+			"cost": 1, "prereqs": [],
+			"effects": [ { "type": "stat_mult", "stat": "cycle_time", "scope": "all", "value": 0.96 } ]
+		},
+		{
+			"id": "smed_workshop", "branch": "speed", "row": 1,
+			"name_key": "skill.smed_workshop.name", "tip_key": "skill.smed_workshop.tip",
+			"cost": 2, "prereqs": ["time_study"],
+			"effects": [ { "type": "stat_mult", "stat": "changeover_time", "scope": "all", "value": 0.75 } ]
+		},
+		{
+			"id": "quick_change_tooling", "branch": "speed", "row": 2,
+			"name_key": "skill.quick_change_tooling.name", "tip_key": "skill.quick_change_tooling.tip",
+			"cost": 2, "prereqs": ["smed_workshop"],
+			"effects": [
+				{ "type": "stat_mult", "stat": "changeover_time", "scope": "all", "value": 0.85 },
+				{ "type": "stat_mult", "stat": "cycle_time", "scope": "all", "value": 0.98 }
+			]
+		},
+		{
+			"id": "standard_work", "branch": "speed", "row": 2,
+			"name_key": "skill.standard_work.name", "tip_key": "skill.standard_work.tip",
+			"cost": 2, "prereqs": ["smed_workshop"],
+			"effects": [
+				{ "type": "stat_mult", "stat": "cycle_time", "scope": "all", "value": 0.96 },
+				{ "type": "stat_toward_one", "stat": "quality", "scope": "all", "value": 0.04 }
+			]
+		},
+		{
+			"id": "takt_time_tuning", "branch": "speed", "row": 3,
+			"name_key": "skill.takt_time_tuning.name", "tip_key": "skill.takt_time_tuning.tip",
+			"cost": 3, "prereqs": ["standard_work"],
+			"effects": [ { "type": "stat_mult", "stat": "cycle_time", "scope": "all", "value": 0.95 } ]
+		},
+		{
+			"id": "motion_kaizen", "branch": "speed", "row": 4,
+			"name_key": "skill.motion_kaizen.name", "tip_key": "skill.motion_kaizen.tip",
+			"cost": 4, "prereqs": ["takt_time_tuning"],
+			"effects": [ { "type": "stat_mult", "stat": "cycle_time", "scope": "all", "value": 0.94 } ]
+		},
+		{
+			"id": "line_balancing", "branch": "speed", "row": 5,
+			"name_key": "skill.line_balancing.name", "tip_key": "skill.line_balancing.tip",
+			"cost": 5, "prereqs": ["motion_kaizen"],
+			"effects": [ { "type": "global_throughput_mult", "value": 1.08 } ]
+		},
+		{
+			"id": "external_setup", "branch": "speed", "row": 6,
+			"name_key": "skill.external_setup.name", "tip_key": "skill.external_setup.tip",
+			"cost": 7, "prereqs": ["line_balancing"],
+			"effects": [ { "type": "stat_mult", "stat": "changeover_time", "scope": "all", "value": 0.78 } ]
+		},
+		{
+			"id": "chaku_chaku", "branch": "speed", "row": 7,
+			"name_key": "skill.chaku_chaku.name", "tip_key": "skill.chaku_chaku.tip",
+			"cost": 9, "prereqs": ["external_setup"],
+			"effects": [
+				{ "type": "stat_mult", "stat": "cycle_time", "scope": "all", "value": 0.93 },
+				{ "type": "global_throughput_mult", "value": 1.04 }
+			]
+		},
+		{
+			"id": "flow_at_takt", "branch": "speed", "row": 8,
+			"name_key": "skill.flow_at_takt.name", "tip_key": "skill.flow_at_takt.tip",
+			"cost": 13, "prereqs": ["chaku_chaku"],
+			"effects": [
+				{ "type": "stat_mult", "stat": "cycle_time", "scope": "all", "value": 0.94 },
+				{ "type": "global_throughput_mult", "value": 1.1 }
+			]
+		},
+		{
+			"id": "morning_huddle", "branch": "people", "row": 0,
+			"name_key": "skill.morning_huddle.name", "tip_key": "skill.morning_huddle.tip",
+			"cost": 1, "prereqs": [],
+			"effects": [ { "type": "global_throughput_mult", "value": 1.03 } ]
+		},
+		{
+			"id": "cross_training", "branch": "people", "row": 1,
+			"name_key": "skill.cross_training.name", "tip_key": "skill.cross_training.tip",
+			"cost": 2, "prereqs": ["morning_huddle"],
+			"effects": [
+				{ "type": "stat_toward_one", "stat": "uptime", "scope": "all", "value": 0.06 },
+				{ "type": "global_throughput_mult", "value": 1.03 }
+			]
+		},
+		{
+			"id": "suggestion_system", "branch": "people", "row": 2,
+			"name_key": "skill.suggestion_system.name", "tip_key": "skill.suggestion_system.tip",
+			"cost": 2, "prereqs": ["cross_training"],
+			"effects": [ { "type": "kp_passive_per_min", "value": 0.1 } ]
+		},
+		{
+			"id": "gemba_walks", "branch": "people", "row": 3,
+			"name_key": "skill.gemba_walks.name", "tip_key": "skill.gemba_walks.tip",
+			"cost": 3, "prereqs": ["suggestion_system"],
+			"effects": [
+				{ "type": "global_throughput_mult", "value": 1.05 },
+				{ "type": "kp_passive_per_min", "value": 0.05 }
+			]
+		},
+		{
+			"id": "institutional_memory", "branch": "people", "row": 3,
+			"name_key": "skill.institutional_memory.name", "tip_key": "skill.institutional_memory.tip",
+			"cost": 3, "prereqs": ["suggestion_system"],
+			"effects": [ { "type": "starting_money_add", "value": 150 } ]
+		},
+		{
+			"id": "kaizen_circles", "branch": "people", "row": 4,
+			"name_key": "skill.kaizen_circles.name", "tip_key": "skill.kaizen_circles.tip",
+			"cost": 4, "prereqs": ["gemba_walks"],
+			"effects": [ { "type": "kp_passive_per_min", "value": 0.15 } ]
+		},
+		{
+			"id": "kaizen_blitz", "branch": "people", "row": 5,
+			"name_key": "skill.kaizen_blitz.name", "tip_key": "skill.kaizen_blitz.tip",
+			"cost": 5, "prereqs": ["kaizen_circles"],
+			"effects": [ { "type": "upgrade_cost_mult", "value": 0.9 } ]
+		},
+		{
+			"id": "second_shift", "branch": "people", "row": 5,
+			"name_key": "skill.second_shift.name", "tip_key": "skill.second_shift.tip",
+			"cost": 5, "prereqs": ["kaizen_circles"],
+			"effects": [ { "type": "offline_rate_mult", "value": 1.15 } ]
+		},
+		{
+			"id": "twi_program", "branch": "people", "row": 6,
+			"name_key": "skill.twi_program.name", "tip_key": "skill.twi_program.tip",
+			"cost": 7, "prereqs": ["kaizen_blitz"],
+			"effects": [
+				{ "type": "stat_toward_one", "stat": "uptime", "scope": "all", "value": 0.06 },
+				{ "type": "stat_toward_one", "stat": "quality", "scope": "all", "value": 0.06 }
+			]
+		},
+		{
+			"id": "hoshin_kanri", "branch": "people", "row": 7,
+			"name_key": "skill.hoshin_kanri.name", "tip_key": "skill.hoshin_kanri.tip",
+			"cost": 9, "prereqs": ["twi_program"],
+			"effects": [
+				{ "type": "global_throughput_mult", "value": 1.06 },
+				{ "type": "kp_passive_per_min", "value": 0.2 }
+			]
+		},
+		{
+			"id": "ci_manager", "branch": "people", "row": 8,
+			"name_key": "skill.ci_manager.name", "tip_key": "skill.ci_manager.tip",
+			"cost": 12, "prereqs": ["hoshin_kanri"],
+			"effects": [ { "type": "auto_buyer", "interval": 30 } ]
+		}
+	]
+}

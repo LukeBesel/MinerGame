@@ -1,0 +1,25 @@
+{
+	"schema_version": 1,
+	"hints": [
+		{ "id": "hint_starved", "priority": 90, "cooldown_s": 45.0, "text_key": "hint.hint_starved",
+			"cond": { "type": "station_starved_seconds", "value": 15 } },
+		{ "id": "hint_afford_fix", "priority": 80, "cooldown_s": 30.0, "text_key": "hint.hint_afford_fix",
+			"cond": { "type": "affordable_bottleneck_upgrade", "value": true } },
+		{ "id": "hint_stuck_90", "priority": 70, "cooldown_s": 90.0, "text_key": "hint.hint_stuck_90",
+			"cond": { "type": "bottleneck_stuck_seconds", "value": 90 } },
+		{ "id": "hint_stuck_300", "priority": 65, "cooldown_s": 180.0, "text_key": "hint.hint_stuck_300",
+			"cond": { "type": "bottleneck_stuck_seconds", "value": 300 } },
+		{ "id": "hint_kp_3", "priority": 60, "cooldown_s": 90.0, "text_key": "hint.hint_kp_3",
+			"cond": { "type": "kp_unspent", "value": 3 } },
+		{ "id": "hint_kp_10", "priority": 55, "cooldown_s": 240.0, "text_key": "hint.hint_kp_10",
+			"cond": { "type": "kp_unspent", "value": 10 } },
+		{ "id": "hint_prestige", "priority": 50, "cooldown_s": 300.0, "text_key": "hint.hint_prestige",
+			"cond": { "type": "can_prestige", "value": true } },
+		{ "id": "hint_gemba", "priority": 20, "cooldown_s": 300.0, "text_key": "hint.hint_gemba",
+			"cond": { "type": "always", "value": true } },
+		{ "id": "hint_watch", "priority": 10, "cooldown_s": 240.0, "text_key": "hint.hint_watch",
+			"cond": { "type": "always", "value": true } },
+		{ "id": "hint_buffers", "priority": 5, "cooldown_s": 360.0, "text_key": "hint.hint_buffers",
+			"cond": { "type": "always", "value": true } }
+	]
+}

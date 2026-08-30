@@ -1,0 +1,28 @@
+# Godot 4 generated
+.godot/
+*.translation
+.import/
+
+# Builds and exports
+builds/
+export/
+*.zip
+*.exe
+*.pck
+*.dmg
+*.x86_64
+*.wasm
+
+# OS / editor noise
+.DS_Store
+*.tmp
+*~
+.vscode/
+.idea/
+
+# Local tooling
+.godot-bin/
+
+# The committed playable web demo is an exception to the build-artifact ignores.
+!webdemo/*.wasm
+!webdemo/*.pck

@@ -1,0 +1,46 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+
+config_version=5
+
+[application]
+
+config/name="Bottleneck"
+config/description="A lean-manufacturing incremental factory game. Find the bottleneck, fix it, grow a plant that runs itself."
+run/main_scene="res://src/core/main.tscn"
+config/features=PackedStringArray("4.5")
+config/icon="res://icon.svg"
+
+[audio]
+
+buses/default_bus_layout=""
+
+[autoload]
+
+L="*res://src/core/locale.gd"
+Data="*res://src/data/loader.gd"
+EventBus="*res://src/core/event_bus.gd"
+SettingsService="*res://src/save/settings_service.gd"
+Game="*res://src/core/game.gd"
+SaveManager="*res://src/save/save_manager.gd"
+SteamBridge="*res://src/steam/steam_bridge.gd"
+AudioDirector="*res://src/juice/audio_director.gd"
+Juice="*res://src/juice/juice.gd"
+
+[debug]
+
+gdscript/warnings/unused_signal=0
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
+renderer/rendering_method.web="gl_compatibility"
+environment/defaults/default_clear_color=Color(0.09, 0.1, 0.12, 1)
