@@ -22,3 +22,7 @@ export/
 
 # Local tooling
 .godot-bin/
+
+# The committed playable web demo is an exception to the build-artifact ignores.
+!webdemo/*.wasm
+!webdemo/*.pck
