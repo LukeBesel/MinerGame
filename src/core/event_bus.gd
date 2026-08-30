@@ -22,6 +22,11 @@ signal skill_purchased(node_id: String)
 signal prestige_performed(cip_gained: int, new_multiplier: float)
 signal offline_report(report: Dictionary)
 
+# Rush orders (timed customer orders; friendly — no failure penalty).
+signal order_started(order_id: String)
+signal order_completed(order_id: String, reward)
+signal order_failed(order_id: String)
+
 # Interaction / UI.
 signal station_selected(station: int)
 signal buy_multiplier_changed(mult: int)
