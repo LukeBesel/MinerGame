@@ -382,7 +382,9 @@ func _spawn_burst(screen_pos: Vector2, amount: int, power: float) -> void:
 	get_tree().create_timer(2.5).timeout.connect(_free_if_valid.bind(p))
 
 
-func _free_if_valid(n: Node) -> void:
+func _free_if_valid(n: Variant) -> void:
+	# Untyped on purpose: the bound node may already be freed when the fallback timer
+	# fires (a freed instance cannot pass through a Node-typed parameter).
 	if n != null and is_instance_valid(n):
 		n.queue_free()
 

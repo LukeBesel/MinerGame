@@ -6,8 +6,10 @@ Updated every phase. See docs/DECISIONS.md for intentional scope calls.
 - **Forward+ visual pass pending**: glow/SSAO/fog were composed via software-GL captures
   (gl_compatibility). Eyeball bloom strength, SSAO contact shading, and fog density once on a
   real GPU in the editor.
-- **Web build untested in a real browser** — compatibility-renderer degradation (no SSAO/fog)
-  verified headless only; do a real HTML5 export pass before the itch demo.
+- ~~Web build untested in a real browser~~ **Done**: exported (no-threads, gl_compatibility)
+  and verified in Chromium via Playwright — boots clean (zero console errors), sim runs,
+  purchases/toasts/tooltips/coach work, Tab enters Gemba Walk. Found and fixed three bugs in
+  the process (Tab vs. ui_focus_next, parked-cursor edge-pan drift, freed-node juice callable).
 - **Steam Deck**: focus navigation and 36 px targets are implemented, but no hardware pass; no
   gamepad button bindings yet (keyboard+mouse fully playable; controller is Phase-4-quality
   work, checklist in steam/README.md §3).

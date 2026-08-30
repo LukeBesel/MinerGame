@@ -14,6 +14,7 @@ const PITCH_MAX := -0.2
 const DIST_MIN := 6.0
 const DIST_MAX := 48.0
 const EDGE_PX := 16.0
+const EDGE_PAN_IDLE_MS := 1500	# edge pan only while the mouse has moved recently
 const WALK_SPEED := 4.3
 const WALK_EYE := 1.62
 
@@ -36,6 +37,7 @@ var _cur_dist := 21.0
 
 var _orbiting := false
 var _panning := false
+var _last_motion_ms: int = -1000000
 var _lmb_down := false
 var _lmb_down_pos := Vector2.ZERO
 var _pending_click := false
@@ -106,11 +108,24 @@ func _refresh_settings(_key: String) -> void:
 	_reduce_motion = WorldLib.reduce_motion()
 
 
-func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("toggle_walk"):
-		_set_mode(SimTypes.CAMERA_WALK if mode == SimTypes.CAMERA_ORBIT else SimTypes.CAMERA_ORBIT)
-		get_viewport().set_input_as_handled()
+## toggle_walk is handled in _input, ahead of GUI focus traversal: Tab is also Godot's
+## built-in ui_focus_next, so by _unhandled_input the UI has already eaten it.
+## Also tracks real mouse motion here (UI-consumed motion never reaches _unhandled_input),
+## which gates edge panning: a parked cursor must not drift the camera.
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		_last_motion_ms = Time.get_ticks_msec()
 		return
+	if not event.is_action_pressed("toggle_walk"):
+		return
+	var focus: Control = get_viewport().gui_get_focus_owner()
+	if focus is LineEdit or focus is TextEdit:
+		return
+	_set_mode(SimTypes.CAMERA_WALK if mode == SimTypes.CAMERA_ORBIT else SimTypes.CAMERA_ORBIT)
+	get_viewport().set_input_as_handled()
+
+
+func _unhandled_input(event: InputEvent) -> void:
 	if mode == SimTypes.CAMERA_WALK:
 		if event.is_action_pressed("pause_menu"):
 			_set_mode(SimTypes.CAMERA_ORBIT)
@@ -189,6 +204,10 @@ func _edge_pan(delta: float) -> void:
 	var vp := get_viewport()
 	if vp == null:
 		return
+	if Time.get_ticks_msec() - _last_motion_ms > EDGE_PAN_IDLE_MS:
+		return	# cursor parked (or never moved) — no drift
+	if vp.gui_get_hovered_control() != null:
+		return	# cursor over the HUD panels that flank the screen edges
 	var mp := vp.get_mouse_position()
 	var size: Vector2 = vp.get_visible_rect().size
 	if mp.x < 0.0 or mp.y < 0.0 or mp.x > size.x or mp.y > size.y:
